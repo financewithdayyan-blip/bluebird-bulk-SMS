@@ -1,0 +1,1279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Bluebird Ledger — Bulk SMS</title>
+<style>
+/* ── TOKENS ──────────────────────────────────────────── */
+:root {
+  --navy:        #f0f6ff;
+  --navy-mid:    #ffffff;
+  --navy-panel:  #f8faff;
+  --navy-card:   #edf3ff;
+  --navy-hover:  #dce8ff;
+  --brass:       #1a56db;
+  --brass-light: #1e40af;
+  --brass-dim:   #3b82f6;
+  --brass-glow:  rgba(26,86,219,.12);
+  --white:       #0f172a;
+  --muted:       #64748b;
+  --green:       #16a34a;
+  --green-l:     #15803d;
+  --red:         #dc2626;
+  --red-l:       #b91c1c;
+  --amber:       #d97706;
+  --amber-l:     #b45309;
+  --purple:      #7c3aed;
+  --purple-l:    #6d28d9;
+  --teal:        #0891b2;
+  --teal-l:      #0e7490;
+  --r:           6px;
+  --shadow:      0 4px 20px rgba(15,23,42,.12);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--navy);color:var(--white);min-height:100vh;display:flex;flex-direction:column;overflow:hidden}
+
+/* ── NAV ──────────────────────────────────────────────── */
+nav{background:var(--navy-mid);border-bottom:2px solid var(--brass-dim);display:flex;align-items:center;padding:0 24px;height:54px;gap:4px;position:sticky;top:0;z-index:200;box-shadow:var(--shadow)}
+.nav-logo{display:flex;align-items:center;gap:9px;font-size:15px;font-weight:800;color:var(--brass-light);letter-spacing:.05em;text-transform:uppercase;margin-right:20px;flex-shrink:0}
+.nav-logo svg{flex-shrink:0}
+.nav-tab{padding:6px 16px;border-radius:var(--r);border:none;background:transparent;color:var(--muted);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:7px;transition:all .15s;position:relative}
+.nav-tab:hover{color:var(--white);background:rgba(15,23,42,.05)}
+.nav-tab.active{color:var(--brass-light);background:var(--brass-glow)}
+.nav-tab.active::after{content:'';position:absolute;bottom:-10px;left:50%;transform:translateX(-50%);width:30px;height:2px;background:var(--brass);border-radius:2px}
+.nav-badge{background:var(--red-l);color:#fff;font-size:9px;font-weight:800;padding:1px 5px;border-radius:10px;min-width:16px;text-align:center}
+.nav-badge.green{background:var(--green)}
+.nav-spacer{flex:1}
+.nav-pill{background:var(--navy-card);border:1px solid rgba(26,86,219,.15);border-radius:20px;padding:4px 12px;font-size:11px;color:var(--muted);display:flex;align-items:center;gap:6px;margin-left:8px}
+.nav-pill strong{color:var(--white);font-size:13px}
+
+/* ── PAGES ────────────────────────────────────────────── */
+.page{display:none;flex:1;overflow:hidden;flex-direction:column}
+.page.active{display:flex}
+
+/* ── SHARED UTILS ─────────────────────────────────────── */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:var(--r);border:none;cursor:pointer;font-size:13px;font-weight:600;font-family:inherit;transition:opacity .15s,transform .1s,background .15s;white-space:nowrap}
+.btn:active{transform:scale(.97)}
+.btn:disabled{opacity:.4;cursor:not-allowed;transform:none}
+.btn-brass{background:var(--brass);color:#ffffff}
+.btn-brass:hover:not(:disabled){background:var(--brass-light)}
+.btn-green{background:var(--green);color:#fff}
+.btn-green:hover:not(:disabled){background:var(--green-l)}
+.btn-ghost{background:transparent;color:var(--muted);border:1px solid rgba(15,23,42,.12)}
+.btn-ghost:hover:not(:disabled){color:var(--white);border-color:rgba(15,23,42,.28)}
+.btn-red{background:var(--red);color:#fff}
+.btn-red:hover:not(:disabled){background:var(--red-l)}
+.btn-full{width:100%;justify-content:center}
+.btn-sm{padding:5px 11px;font-size:11.5px}
+
+.section-label{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:var(--brass);margin-bottom:10px;display:flex;align-items:center;gap:6px}
+
+input,select,textarea{font-family:inherit;color:var(--white)}
+input[type=checkbox]{accent-color:var(--brass);width:14px;height:14px;cursor:pointer}
+
+.field-input{background:var(--navy-card);border:1px solid rgba(26,86,219,.2);color:var(--white);border-radius:var(--r);padding:8px 12px;font-size:13px;width:100%}
+.field-input:focus{outline:none;border-color:var(--brass)}
+.field-input::placeholder{color:var(--muted)}
+select.field-input option{background:var(--navy-mid)}
+
+/* ── TOAST ────────────────────────────────────────────── */
+#toast{position:fixed;bottom:24px;right:24px;background:var(--navy-panel);border:1px solid var(--brass);border-radius:var(--r);padding:11px 18px;font-size:13px;box-shadow:var(--shadow);z-index:999;opacity:0;transform:translateY(10px);transition:all .25s;pointer-events:none;max-width:320px}
+#toast.show{opacity:1;transform:translateY(0)}
+
+/* ── MODAL ────────────────────────────────────────────── */
+.modal-bg{position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:500;display:none;align-items:center;justify-content:center}
+.modal-bg.open{display:flex}
+.modal{background:var(--navy-panel);border:1px solid var(--brass-dim);border-radius:8px;padding:28px;width:460px;max-width:95vw;box-shadow:var(--shadow)}
+.modal h2{font-size:16px;color:var(--brass-light);margin-bottom:18px;display:flex;align-items:center;gap:8px}
+
+/* ══════════════════════════════════════════════════════
+   PAGE 1 — KANBAN
+══════════════════════════════════════════════════════ */
+#page-kanban{overflow:hidden}
+.kanban-toolbar{background:var(--navy-mid);border-bottom:1px solid rgba(15,23,42,.05);padding:10px 20px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.kanban-search{flex:1;min-width:180px;background:var(--navy-card);border:1px solid rgba(15,23,42,.09);border-radius:20px;padding:7px 14px;font-size:12.5px}
+.kanban-search:focus{outline:none;border-color:var(--brass)}
+.kanban-search::placeholder{color:var(--muted)}
+.kanban-board{flex:1;overflow-x:auto;overflow-y:hidden;padding:20px;display:flex;gap:16px}
+.k-col{flex-shrink:0;width:260px;display:flex;flex-direction:column;gap:0}
+.k-col-head{background:var(--navy-panel);border-radius:var(--r) var(--r) 0 0;padding:10px 14px;display:flex;align-items:center;gap:10px;border-bottom:2px solid var(--col-color,var(--brass-dim))}
+.k-col-head .col-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--col-color,var(--muted));flex:1}
+.k-col-head .col-count{background:rgba(15,23,42,.07);border-radius:10px;padding:1px 8px;font-size:11px;color:var(--muted);flex-shrink:0}
+.k-col-checkbox-wrap{display:flex;align-items:center;gap:5px;cursor:pointer;flex-shrink:0;padding:3px 7px;border-radius:4px;border:1px solid rgba(15,23,42,.12);transition:all .15s;user-select:none}
+.k-col-checkbox-wrap:hover{background:var(--brass-glow);border-color:var(--brass-dim)}
+.k-col-checkbox-wrap.all-sel{background:var(--brass-glow);border-color:var(--brass-dim)}
+.k-col-checkbox-wrap input[type=checkbox]{width:13px;height:13px;margin:0;cursor:pointer;accent-color:var(--brass)}
+.k-col-checkbox-wrap span{font-size:10px;font-weight:700;color:var(--muted);white-space:nowrap}
+.k-cards{flex:1;background:rgba(26,86,219,.04);border-radius:0 0 var(--r) var(--r);padding:10px;display:flex;flex-direction:column;gap:8px;overflow-y:auto;max-height:calc(100vh - 200px);min-height:100px}
+.k-card{background:var(--navy-card);border-radius:var(--r);padding:11px 13px;border-left:3px solid var(--col-color,var(--brass-dim));cursor:pointer;transition:background .12s,transform .12s;position:relative}
+.k-card:hover{background:var(--navy-hover);transform:translateY(-1px)}
+.k-card.selected{background:var(--navy-hover);box-shadow:0 0 0 1px var(--brass)}
+.k-card-name{font-size:13px;font-weight:600;margin-bottom:3px;display:flex;align-items:center;gap:6px}
+.k-card-phone{font-size:11px;font-family:'Cascadia Code','Courier New',monospace;color:var(--muted);margin-bottom:4px}
+.k-card-addr{font-size:10.5px;color:var(--muted);line-height:1.4}
+.k-card-footer{display:flex;align-items:center;gap:6px;margin-top:7px}
+.k-badge{font-size:9px;font-weight:700;text-transform:uppercase;padding:2px 7px;border-radius:10px;letter-spacing:.05em}
+.k-card-check{position:absolute;top:8px;right:8px;opacity:0;transition:opacity .12s}
+.k-card:hover .k-card-check,.k-card.selected .k-card-check{opacity:1}
+.k-empty{text-align:center;padding:24px 12px;color:var(--muted);font-size:11.5px;opacity:.6}
+.k-card{cursor:grab}
+.k-card:active{cursor:grabbing}
+.k-card.dragging{opacity:.35;transform:scale(.97);box-shadow:none}
+.k-cards.drag-over{background:rgba(26,86,219,.07);outline:2px dashed #3b82f6;outline-offset:-3px;border-radius:0 0 6px 6px}
+
+/* ══════════════════════════════════════════════════════
+   PAGE 2 — COMPOSE (Upload + Template)
+══════════════════════════════════════════════════════ */
+#page-compose{overflow-y:auto}
+.compose-wrap{max-width:820px;margin:0 auto;padding:28px 24px;display:flex;flex-direction:column;gap:24px}
+.compose-card{background:var(--navy-mid);border-radius:8px;padding:22px 24px;border:1px solid rgba(26,86,219,.1)}
+.compose-card h3{font-size:14px;font-weight:700;margin-bottom:16px;display:flex;align-items:center;gap:8px;color:var(--brass-light)}
+.step-num{background:var(--brass);color:#ffffff;width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;flex-shrink:0}
+
+.upload-zone{border:2px dashed rgba(26,86,219,.3);border-radius:var(--r);padding:28px;text-align:center;cursor:pointer;transition:all .2s;position:relative}
+.upload-zone:hover,.upload-zone.drag{border-color:var(--brass);background:rgba(192,154,47,.05)}
+.upload-zone input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.upload-zone .uz-icon{font-size:32px;margin-bottom:8px}
+.upload-zone p{font-size:13px;color:var(--muted)}
+.upload-zone strong{color:var(--brass-light)}
+
+.map-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
+.map-field label{font-size:11px;color:var(--muted);display:block;margin-bottom:5px;text-transform:uppercase;letter-spacing:.06em}
+
+.template-area{width:100%;min-height:100px;resize:vertical;background:var(--navy-card);border:1px solid rgba(26,86,219,.2);border-radius:var(--r);padding:11px 14px;font-size:13px;line-height:1.6;color:var(--white)}
+.template-area:focus{outline:none;border-color:var(--brass)}
+.template-area::placeholder{color:var(--muted)}
+.tag-input-wrap{display:flex;flex-wrap:wrap;align-items:center;gap:6px;background:var(--navy-card);border:1px solid rgba(26,86,219,.2);border-radius:var(--r);padding:7px 10px;min-height:42px;cursor:text}
+.tag-input-wrap:focus-within{border-color:var(--brass)}
+.tag-pills{display:flex;flex-wrap:wrap;gap:5px}
+.tag-pill{display:inline-flex;align-items:center;gap:5px;background:rgba(26,86,219,.12);border:1px solid rgba(26,86,219,.3);color:var(--brass);font-size:11px;font-weight:600;padding:2px 8px 2px 10px;border-radius:20px}
+.tag-pill .tag-x{cursor:pointer;font-size:13px;line-height:1;color:var(--muted);transition:color .15s}
+.tag-pill .tag-x:hover{color:var(--red)}
+.tag-text-input{background:transparent;border:none;outline:none;color:var(--white);font-size:12.5px;font-family:inherit;flex:1;min-width:140px}
+.tag-text-input::placeholder{color:var(--muted)}
+.preset-tag-btn{background:rgba(26,86,219,.07);border:1px solid rgba(26,86,219,.2);color:var(--brass-dim);font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;cursor:pointer;font-family:inherit;transition:all .15s}
+.preset-tag-btn:hover{background:rgba(26,86,219,.15);border-color:var(--brass);color:var(--brass)}
+.k-lead-tag{display:inline-flex;align-items:center;background:rgba(26,86,219,.1);border:1px solid rgba(26,86,219,.22);color:var(--brass-dim);font-size:9px;font-weight:700;padding:1px 6px;border-radius:10px;letter-spacing:.03em;white-space:nowrap}
+.tag-filter-chip{padding:4px 11px;border-radius:20px;font-size:11px;font-weight:600;border:1px solid rgba(26,86,219,.2);cursor:pointer;background:transparent;color:var(--muted);font-family:inherit;transition:all .15s}
+.tag-filter-chip:hover{background:rgba(26,86,219,.08);color:var(--brass)}
+.tag-filter-chip.active{background:rgba(26,86,219,.12);color:var(--brass);border-color:var(--brass)}
+.tag-chip{background:rgba(26,86,219,.1);border:1px solid rgba(26,86,219,.25);color:var(--brass-light);font-size:10.5px;font-family:'Cascadia Code','Courier New',monospace;padding:3px 9px;border-radius:3px;cursor:pointer;transition:background .15s}
+.tag-chip:hover{background:rgba(26,86,219,.25)}
+.char-bar{display:flex;justify-content:space-between;align-items:center;margin-top:8px;font-size:11px;color:var(--muted)}
+.char-bar span{font-variant-numeric:tabular-nums}
+.char-bar.warn span{color:#e08000}
+.char-bar.over span{color:var(--red-l)}
+
+.preview-box{background:rgba(15,23,42,.04);border-radius:var(--r);padding:14px;font-size:12.5px;color:#334155;line-height:1.6;border-left:3px solid #3b82f6;font-style:italic;min-height:48px}
+
+/* ══════════════════════════════════════════════════════
+   PAGE 3 — SEND
+══════════════════════════════════════════════════════ */
+#page-send{overflow-y:auto}
+.send-wrap{max-width:900px;margin:0 auto;padding:28px 24px;display:flex;flex-direction:column;gap:22px}
+.send-top{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
+.stat-card{background:var(--navy-mid);border-radius:8px;padding:18px 20px;border:1px solid rgba(192,154,47,.1);display:flex;flex-direction:column;gap:4px}
+.stat-card .s-num{font-size:28px;font-weight:800;line-height:1}
+.stat-card .s-lbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
+.stat-card.c-sent .s-num{color:#16a34a}
+.stat-card.c-fail .s-num{color:#dc2626}
+.stat-card.c-skip .s-num{color:var(--muted)}
+.stat-card.c-queue .s-num{color:var(--brass-light)}
+
+.send-panel{background:var(--navy-mid);border-radius:8px;padding:22px 24px;border:1px solid rgba(26,86,219,.1)}
+.send-panel h3{font-size:14px;font-weight:700;margin-bottom:16px;color:var(--brass-light);display:flex;align-items:center;gap:8px}
+
+.prog-wrap{background:rgba(15,23,42,.05);border-radius:4px;height:10px;overflow:hidden;margin-bottom:8px}
+.prog-bar{height:100%;background:linear-gradient(90deg,#3b82f6,#1a56db);width:0%;transition:width .35s ease;border-radius:4px}
+.prog-label{font-size:11.5px;color:var(--muted);margin-bottom:18px}
+
+.log-wrap{background:rgba(15,23,42,.06);border-radius:var(--r);padding:12px 14px;font-family:'Cascadia Code','Courier New',monospace;font-size:11px;line-height:1.9;max-height:260px;overflow-y:auto;color:#475569}
+.log-sent{color:#16a34a}
+.log-fail{color:#dc2626}
+.log-skip{color:#94a3b8}
+.log-info{color:#1a56db}
+.log-warn{color:#d97706}
+
+.queue-table-wrap{overflow:auto;max-height:280px;border-radius:var(--r);border:1px solid rgba(15,23,42,.05)}
+.queue-table{width:100%;border-collapse:collapse;font-size:12px}
+.queue-table thead tr{background:var(--navy-card);border-bottom:1px solid rgba(26,86,219,.2)}
+.queue-table th{padding:8px 12px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--brass);white-space:nowrap}
+.queue-table tbody tr{border-bottom:1px solid rgba(15,23,42,.04);transition:background .1s}
+.queue-table tbody tr:hover{background:rgba(15,23,42,.03)}
+.queue-table td{padding:8px 12px;color:var(--white);vertical-align:middle}
+.queue-table .mono{font-family:'Cascadia Code','Courier New',monospace;font-size:11px;color:#334155}
+
+.s-badge{display:inline-flex;align-items:center;gap:4px;font-size:9.5px;font-weight:700;padding:2px 8px;border-radius:10px;text-transform:uppercase}
+.sb-pending{background:rgba(26,86,219,.12);color:var(--brass-light)}
+.sb-sent{background:rgba(26,107,60,.25);color:#16a34a}
+.sb-failed{background:rgba(123,31,31,.3);color:#dc2626}
+.sb-skipped{background:rgba(15,23,42,.06);color:var(--muted)}
+.sb-dot{width:5px;height:5px;border-radius:50%;background:currentColor}
+
+/* ══════════════════════════════════════════════════════
+   PAGE 4 — SETTINGS
+══════════════════════════════════════════════════════ */
+#page-settings{overflow-y:auto}
+.settings-wrap{max-width:680px;margin:0 auto;padding:28px 24px;display:flex;flex-direction:column;gap:22px}
+.settings-card{background:var(--navy-mid);border-radius:8px;padding:22px 24px;border:1px solid rgba(26,86,219,.1)}
+.settings-card h3{font-size:14px;font-weight:700;margin-bottom:18px;color:var(--brass-light);display:flex;align-items:center;gap:8px;padding-bottom:12px;border-bottom:1px solid rgba(15,23,42,.05)}
+.field-group{display:flex;flex-direction:column;gap:14px}
+.field{display:flex;flex-direction:column;gap:5px}
+.field label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;font-weight:600}
+.field-desc{font-size:11px;color:var(--muted);margin-top:3px}
+.field-row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.provider-tabs{display:flex;gap:4px;margin-bottom:16px}
+.prov-tab{padding:7px 16px;border-radius:var(--r);border:1px solid rgba(15,23,42,.09);background:transparent;color:var(--muted);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;transition:all .15s}
+.prov-tab.active{background:var(--brass-glow);color:var(--brass-light);border-color:var(--brass-dim)}
+.provider-form{display:none}
+.provider-form.active{display:flex;flex-direction:column;gap:14px}
+.toggle-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid rgba(15,23,42,.05)}
+.toggle-row:last-child{border-bottom:none}
+.toggle-info strong{display:block;font-size:13px;margin-bottom:2px}
+.toggle-info span{font-size:11px;color:var(--muted)}
+.toggle{position:relative;width:40px;height:22px;flex-shrink:0}
+.toggle input{opacity:0;width:0;height:0}
+.toggle-slider{position:absolute;inset:0;background:rgba(15,23,42,.12);border-radius:11px;cursor:pointer;transition:background .2s}
+.toggle-slider::after{content:'';position:absolute;left:3px;top:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .2s}
+.toggle input:checked+.toggle-slider{background:var(--brass)}
+.toggle input:checked+.toggle-slider::after{transform:translateX(18px)}
+.save-row{display:flex;justify-content:flex-end;gap:10px;margin-top:4px}
+.key-field{font-family:'Cascadia Code','Courier New',monospace;font-size:12px;letter-spacing:.03em}
+</style>
+</head>
+<body>
+
+<!-- ── NAV ──────────────────────────────────────────────── -->
+<nav>
+  <div class="nav-logo">
+    <svg width="26" height="26" viewBox="0 0 28 28" fill="none">
+      <ellipse cx="14" cy="16" rx="7" ry="5" fill="#1a56db" opacity=".9"/>
+      <ellipse cx="18" cy="13" rx="4" ry="2.5" fill="#3b82f6" transform="rotate(-20 18 13)"/>
+      <path d="M21 12 Q26 10 28 8 Q25 11 22 13" fill="#3b82f6"/>
+      <circle cx="20" cy="12" r="1.5" fill="#ffffff"/>
+      <path d="M9 14 Q3 12 1 8 Q5 13 10 15" fill="#1e40af" opacity=".7"/>
+      <path d="M15 19 Q14 24 12 27" stroke="#3b82f6" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+    </svg>
+    Bluebird <span style="color:var(--muted);font-weight:400;margin:0 2px">/</span> Bulk SMS
+  </div>
+
+  <button class="nav-tab active" onclick="goPage('kanban',this)" data-page="kanban">
+    📋 Kanban <span class="nav-badge green" id="nb-kanban">0</span>
+  </button>
+  <button class="nav-tab" onclick="goPage('compose',this)" data-page="compose">
+    ✏️ Compose
+  </button>
+  <button class="nav-tab" onclick="goPage('send',this)" data-page="send">
+    🚀 Send <span class="nav-badge" id="nb-send" style="display:none"></span>
+  </button>
+  <button class="nav-tab" onclick="goPage('settings',this)" data-page="settings">
+    ⚙️ Settings
+  </button>
+
+  <div class="nav-spacer"></div>
+  <div class="nav-pill">Leads <strong id="hdr-total">0</strong></div>
+  <div class="nav-pill">Selected <strong id="hdr-sel">0</strong></div>
+</nav>
+
+<!-- ══════════════════════════════════════════════════════
+     PAGE: KANBAN
+══════════════════════════════════════════════════════ -->
+<div class="page active" id="page-kanban">
+  <div class="kanban-toolbar">
+    <input class="kanban-search" id="k-search" placeholder="🔍  Search name, phone, address…" oninput="renderKanban()"/>
+    <button class="btn btn-ghost btn-sm" onclick="selectAllVisible()">Select All</button>
+    <button class="btn btn-ghost btn-sm" onclick="clearSelection()">✕ Clear</button>
+    <button class="btn btn-brass btn-sm" onclick="goPage('send',document.querySelector('[data-page=send]'))" id="send-sel-btn" disabled>
+      🚀 Send to Selected (<span id="sel-count">0</span>)
+    </button>
+    <button class="btn btn-ghost btn-sm" onclick="exportCSV()">⬇ Export</button>
+  </div>
+  <div id="tag-filter-bar" style="display:none;background:var(--navy-mid);border-bottom:1px solid rgba(15,23,42,.06);padding:7px 18px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;overflow-x:auto;">
+    <span style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);flex-shrink:0;">Filter by tag:</span>
+    <button class="tag-filter-chip active" data-tag="" onclick="setTagFilter('',this)">All</button>
+    <div id="tag-filter-chips" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
+  </div>
+  <div class="kanban-board" id="kanban-board">
+    <!-- columns rendered by JS -->
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════
+     PAGE: COMPOSE
+══════════════════════════════════════════════════════ -->
+<div class="page" id="page-compose">
+<div class="compose-wrap">
+
+  <!-- Step 1: Upload -->
+  <div class="compose-card">
+    <h3><span class="step-num">1</span> Upload Leads CSV</h3>
+    <div class="upload-zone" id="upload-zone">
+      <input type="file" id="csv-file" accept=".csv"/>
+      <div class="uz-icon">📂</div>
+      <p><strong>Click or drag</strong> a .csv file here</p>
+      <p style="margin-top:5px;font-size:11.5px;">Expected columns: name, phone, address, stage, opted_out</p>
+    </div>
+    <div id="map-section" style="display:none;margin-top:18px;">
+      <div class="section-label">Map CSV Columns</div>
+      <div class="map-grid">
+        <div class="map-field"><label>Name column</label><select class="field-input" id="col-name"></select></div>
+        <div class="map-field"><label>Phone column</label><select class="field-input" id="col-phone"></select></div>
+        <div class="map-field"><label>Address column</label><select class="field-input" id="col-address"></select></div>
+        <div class="map-field"><label>Stage column</label><select class="field-input" id="col-stage"></select></div>
+        <div class="map-field"><label>Opted-out column</label><select class="field-input" id="col-opted"></select></div>
+      </div>
+      <div style="margin-top:16px;">
+        <div class="section-label">Tag this batch</div>
+        <p style="font-size:11.5px;color:var(--muted);margin-bottom:10px;">Tags are applied to every lead in this upload. Type and press Enter or comma to add.</p>
+        <div class="tag-input-wrap" id="tag-input-wrap">
+          <div class="tag-pills" id="tag-pills"></div>
+          <input class="tag-text-input" id="tag-text" placeholder="e.g. NC Foreclosure, July Batch, Priority…" />
+        </div>
+        <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;" id="tag-presets">
+          <span style="font-size:10.5px;color:var(--muted);align-self:center;">Quick add:</span>
+          <button class="preset-tag-btn" onclick="addPresetTag('Pre-Foreclosure')">Pre-Foreclosure</button>
+          <button class="preset-tag-btn" onclick="addPresetTag('Probate')">Probate</button>
+          <button class="preset-tag-btn" onclick="addPresetTag('Tax Delinquent')">Tax Delinquent</button>
+          <button class="preset-tag-btn" onclick="addPresetTag('Lis Pendens')">Lis Pendens</button>
+          <button class="preset-tag-btn" onclick="addPresetTag('Code Violation')">Code Violation</button>
+          <button class="preset-tag-btn" onclick="addPresetTag('Eviction')">Eviction</button>
+          <button class="preset-tag-btn" onclick="addPresetTag('Priority')">Priority</button>
+        </div>
+      </div>
+      <div style="margin-top:16px;display:flex;gap:10px;">
+        <button class="btn btn-brass" id="import-btn" onclick="importLeads()">Import Leads →</button>
+        <span id="import-status" style="font-size:12px;color:var(--muted);align-self:center;"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 2: Template -->
+  <div class="compose-card">
+    <h3><span class="step-num">2</span> Message Template</h3>
+    <textarea class="template-area" id="template" oninput="onTemplateInput()" placeholder="Hi {name}, this is Dayyan from Bluebird Acquisitions. We buy houses in any condition in {city}. Interested in a cash offer for {address}? Reply STOP to opt out."></textarea>
+    <div class="char-bar" id="char-bar"><span id="char-count">0 chars · 1 segment</span></div>
+    <div class="tag-row">
+      <span class="tag-chip" onclick="insertTag('{name}')">&#x7B;name&#x7D;</span>
+      <span class="tag-chip" onclick="insertTag('{address}')">&#x7B;address&#x7D;</span>
+      <span class="tag-chip" onclick="insertTag('{city}')">&#x7B;city&#x7D;</span>
+      <span class="tag-chip" onclick="insertTag('{phone}')">&#x7B;phone&#x7D;</span>
+      <span class="tag-chip" onclick="insertTag('{stage}')">&#x7B;stage&#x7D;</span>
+    </div>
+  </div>
+
+  <!-- Step 3: Preview -->
+  <div class="compose-card">
+    <h3><span class="step-num">3</span> Preview Message</h3>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:10px;">Showing merged for first selected lead (or first lead if none selected)</p>
+    <div class="preview-box" id="preview-box">Write a template above to see a preview.</div>
+    <div style="margin-top:14px;">
+      <button class="btn btn-green" onclick="goPage('send',document.querySelector('[data-page=send]'))">Looks good — go to Send →</button>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════
+     PAGE: SEND
+══════════════════════════════════════════════════════ -->
+<div class="page" id="page-send">
+<div class="send-wrap">
+
+  <div class="send-top">
+    <div class="stat-card c-queue">
+      <div class="s-num" id="st-queue">0</div>
+      <div class="s-lbl">In Queue</div>
+    </div>
+    <div class="stat-card c-sent">
+      <div class="s-num" id="st-sent">0</div>
+      <div class="s-lbl">Sent</div>
+    </div>
+    <div class="stat-card c-fail">
+      <div class="s-num" id="st-fail">0</div>
+      <div class="s-lbl">Failed</div>
+    </div>
+  </div>
+
+  <!-- Controls -->
+  <div class="send-panel">
+    <h3>🚀 Send Controls</h3>
+    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:16px;">
+      <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);">
+        Delay between sends:
+        <input type="number" class="field-input" id="delay-sec" value="3" min="1" max="60" style="width:72px;"/>
+        seconds
+      </div>
+      <button class="btn btn-green" id="send-btn" onclick="startSend()" disabled>🚀 Start Sending</button>
+      <button class="btn btn-red" id="cancel-btn" onclick="cancelSend()" style="display:none;">⛔ Cancel</button>
+      <button class="btn btn-ghost btn-sm" onclick="resetStatuses()" id="reset-btn">↺ Reset Statuses</button>
+    </div>
+    <div class="prog-wrap"><div class="prog-bar" id="prog-bar"></div></div>
+    <div class="prog-label" id="prog-label">Select leads in Kanban, compose a template, then send.</div>
+    <div class="log-wrap" id="log-wrap"></div>
+  </div>
+
+  <!-- Queue table -->
+  <div class="send-panel">
+    <h3>📋 Send Queue</h3>
+    <div class="queue-table-wrap">
+      <table class="queue-table">
+        <thead><tr>
+          <th>Name</th><th>Phone</th><th>Address</th><th>Stage</th><th>Opted Out</th><th>Status</th>
+        </tr></thead>
+        <tbody id="queue-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════
+     PAGE: SETTINGS
+══════════════════════════════════════════════════════ -->
+<div class="page" id="page-settings">
+<div class="settings-wrap">
+
+  <!-- SMS Provider -->
+  <div class="settings-card">
+    <h3>📡 SMS Provider</h3>
+    <div class="provider-tabs">
+      <button class="prov-tab active" onclick="setProv('twilio',this)">Twilio</button>
+      <button class="prov-tab" onclick="setProv('zoom',this)">Zoom Phone</button>
+      <button class="prov-tab" onclick="setProv('openphone',this)">OpenPhone</button>
+      <button class="prov-tab" onclick="setProv('demo',this)">Demo Mode</button>
+    </div>
+
+    <div class="provider-form active" id="prov-twilio">
+      <div class="field"><label>Account SID</label><input class="field-input key-field" id="twilio-sid" placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" /></div>
+      <div class="field"><label>Auth Token</label><input class="field-input key-field" id="twilio-token" type="password" placeholder="••••••••••••••••••••••••••••••••" /></div>
+      <div class="field"><label>From Number</label><input class="field-input key-field" id="twilio-from" placeholder="+12145550000" /></div>
+      <p class="field-desc">Messages are sent via <code>POST /2010-04-01/Accounts/{SID}/Messages.json</code>. Credentials are saved in localStorage only.</p>
+    </div>
+
+    <div class="provider-form" id="prov-zoom">
+      <div class="field"><label>Account ID</label><input class="field-input key-field" id="zoom-acct" placeholder="your_zoom_account_id" /></div>
+      <div class="field"><label>Client ID</label><input class="field-input key-field" id="zoom-client" placeholder="your_client_id" /></div>
+      <div class="field"><label>Client Secret</label><input class="field-input key-field" id="zoom-secret" type="password" placeholder="••••••••••••••••" /></div>
+      <div class="field"><label>From Number (E.164)</label><input class="field-input key-field" id="zoom-from" placeholder="+12145550000" /></div>
+      <p class="field-desc">Uses Zoom Phone SMS API — <code>POST /v2/phone/sms/sessions</code>.</p>
+    </div>
+
+    <div class="provider-form" id="prov-openphone">
+      <div class="field"><label>API Key</label><input class="field-input key-field" id="op-key" type="password" placeholder="••••••••••••••••" /></div>
+      <div class="field"><label>From Number</label><input class="field-input key-field" id="op-from" placeholder="+12145550000" /></div>
+      <p class="field-desc">Uses <code>POST /v1/messages</code> on the OpenPhone API.</p>
+    </div>
+
+    <div class="provider-form" id="prov-demo">
+      <div style="padding:16px;background:rgba(26,86,219,.07);border-radius:var(--r);border-left:3px solid var(--brass);font-size:13px;color:var(--muted);">
+        <strong style="color:var(--brass-light);">Demo Mode Active</strong><br/>
+        No real SMS will be sent. The app simulates API calls with randomized success/failure. Use this to test the workflow before wiring up a real provider.
+      </div>
+    </div>
+
+    <div class="save-row">
+      <button class="btn btn-ghost btn-sm" onclick="testProvider()">🔌 Test Connection</button>
+      <button class="btn btn-brass" onclick="saveSettings()">Save Settings</button>
+    </div>
+  </div>
+
+  <!-- Sender Info -->
+  <div class="settings-card">
+    <h3>👤 Sender Info</h3>
+    <div class="field-group">
+      <div class="field-row">
+        <div class="field"><label>Sender Name</label><input class="field-input" id="s-name" placeholder="Dayyan — Bluebird Acquisitions" /></div>
+        <div class="field"><label>Company</label><input class="field-input" id="s-company" placeholder="Bluebird Acquisitions" /></div>
+      </div>
+      <div class="field"><label>Default opt-out footer</label><input class="field-input" id="s-footer" placeholder="Reply STOP to opt out." /></div>
+      <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);">
+        <input type="checkbox" id="auto-footer" checked />
+        <label for="auto-footer">Auto-append opt-out footer to every message</label>
+      </div>
+    </div>
+    <div class="save-row"><button class="btn btn-brass" onclick="saveSettings()">Save</button></div>
+  </div>
+
+  <!-- Send Behavior -->
+  <div class="settings-card">
+    <h3>⚙️ Send Behavior</h3>
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <strong>Skip opted-out leads</strong>
+        <span>Automatically skip any lead where opted_out = true / yes / 1</span>
+      </div>
+      <label class="toggle"><input type="checkbox" id="t-skip-opted" checked /><span class="toggle-slider"></span></label>
+    </div>
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <strong>Skip leads with no phone number</strong>
+        <span>Don't attempt to send if phone field is empty</span>
+      </div>
+      <label class="toggle"><input type="checkbox" id="t-skip-nophone" checked /><span class="toggle-slider"></span></label>
+    </div>
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <strong>Skip already-sent leads</strong>
+        <span>Don't re-send to leads already marked Sent in this session</span>
+      </div>
+      <label class="toggle"><input type="checkbox" id="t-skip-sent" checked /><span class="toggle-slider"></span></label>
+    </div>
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <strong>Log all sends to console</strong>
+        <span>Useful for debugging API calls</span>
+      </div>
+      <label class="toggle"><input type="checkbox" id="t-console" /><span class="toggle-slider"></span></label>
+    </div>
+    <div class="save-row"><button class="btn btn-brass" onclick="saveSettings()">Save</button></div>
+  </div>
+
+  <!-- Danger Zone -->
+  <div class="settings-card" style="border-color:rgba(220,38,38,.2);">
+    <h3 style="color:#dc2626;">⚠️ Data</h3>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <button class="btn btn-ghost btn-sm" onclick="exportCSV()">⬇ Export all leads</button>
+      <button class="btn btn-red btn-sm" onclick="clearAll()">🗑 Clear all leads</button>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<!-- ── TOAST ──────────────────────────────────────────────── -->
+<div id="toast"></div>
+
+<script>
+/* ═══════════════════════════════════════════════════
+   STATE
+═══════════════════════════════════════════════════ */
+let leads = [];
+let csvRaw = [];
+let currentProv = 'demo';
+let sending = false;
+let abortSend = false;
+let pendingTags = [];   // tags typed before import
+let activeTagFilter = ''; // tag filter on kanban
+
+const COLS = [
+  {id:'cold_call',   label:'Cold Call',   color:'#1e40af', textColor:'#1a56db'},
+  {id:'contacted',   label:'Contacted',   color:'#4338ca', textColor:'#6366f1'},
+  {id:'interested',  label:'Interested',  color:'#0891b2', textColor:'#0e7490'},
+  {id:'follow_up',   label:'Follow-Up',   color:'#059669', textColor:'#10b981'},
+  {id:'dead',        label:'Dead',        color:'#94a3b8',    textColor:'#64748b'},
+];
+
+const statusColors = {
+  pending: 'sb-pending', sent: 'sb-sent', failed: 'sb-failed', skipped: 'sb-skipped'
+};
+
+/* ═══════════════════════════════════════════════════
+   NAV
+═══════════════════════════════════════════════════ */
+function goPage(id, el) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('page-' + id).classList.add('active');
+  if (el) el.classList.add('active');
+  if (id === 'send') renderSendPage();
+  if (id === 'kanban') renderKanban();
+}
+
+/* ═══════════════════════════════════════════════════
+   CSV UPLOAD
+═══════════════════════════════════════════════════ */
+const uploadZone = document.getElementById('upload-zone');
+const fileInput  = document.getElementById('csv-file');
+
+uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('drag'); });
+uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag'));
+uploadZone.addEventListener('drop', e => { e.preventDefault(); uploadZone.classList.remove('drag'); if (e.dataTransfer.files[0]) processFile(e.dataTransfer.files[0]); });
+fileInput.addEventListener('change', () => { if (fileInput.files[0]) processFile(fileInput.files[0]); });
+
+function processFile(file) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    const rows = parseCSV(e.target.result);
+    if (rows.length < 2) { toast('CSV appears empty.'); return; }
+    csvRaw = rows;
+    populateColumnSelects(rows[0]);
+    document.getElementById('map-section').style.display = '';
+    uploadZone.querySelector('p').textContent = `✅  ${file.name}  ·  ${rows.length - 1} rows detected`;
+    uploadZone.querySelector('.uz-icon').textContent = '✅';
+  };
+  reader.readAsText(file);
+}
+
+function parseCSV(text) {
+  return text.trim().split(/\r?\n/).map(line => {
+    const cells = []; let cur = '', inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '"') inQ = !inQ;
+      else if (c === ',' && !inQ) { cells.push(cur.trim()); cur = ''; }
+      else cur += c;
+    }
+    cells.push(cur.trim());
+    return cells;
+  });
+}
+
+function populateColumnSelects(headers) {
+  const selectors = [
+    {id:'col-name',    hint:['name','first','full']},
+    {id:'col-phone',   hint:['phone','mobile','cell','number']},
+    {id:'col-address', hint:['address','addr','property','street']},
+    {id:'col-stage',   hint:['stage','status','pipeline']},
+    {id:'col-opted',   hint:['opt','unsubscribe','stop']},
+  ];
+  selectors.forEach(({id, hint}) => {
+    const sel = document.getElementById(id);
+    sel.innerHTML = '<option value="">— skip —</option>';
+    headers.forEach((h, i) => {
+      const opt = document.createElement('option');
+      opt.value = i; opt.textContent = h;
+      if (hint.some(k => h.toLowerCase().includes(k))) opt.selected = true;
+      sel.appendChild(opt);
+    });
+  });
+}
+
+function formatPhone(raw) {
+  const digits = raw.replace(/\D/g, '');
+  if (!digits) return raw;
+  // Already has country code
+  if (digits.length === 11 && digits.startsWith('1')) return '+' + digits;
+  if (digits.length > 11) return '+' + digits; // international, leave as-is with +
+  // 10-digit US number → prepend +1
+  if (digits.length === 10) return '+1' + digits;
+  // Shorter/longer but already has a + → return original trimmed
+  if (raw.trim().startsWith('+')) return raw.trim();
+  // Fallback — return as-is
+  return raw.trim();
+}
+
+function importLeads() {
+  if (!csvRaw.length) return;
+  const ci = {
+    name:    document.getElementById('col-name').value,
+    phone:   document.getElementById('col-phone').value,
+    address: document.getElementById('col-address').value,
+    stage:   document.getElementById('col-stage').value,
+    opted:   document.getElementById('col-opted').value,
+  };
+  const newLeads = csvRaw.slice(1).filter(r => r.some(c => c)).map((r, i) => ({
+    id: Date.now() + i,
+    name:      ci.name    !== '' ? (r[+ci.name]    || '') : '',
+    phone:     ci.phone   !== '' ? formatPhone(r[+ci.phone] || '') : '',
+    address:   ci.address !== '' ? (r[+ci.address] || '') : '',
+    stage:     ci.stage   !== '' ? (r[+ci.stage]   || 'Cold Call') : 'Cold Call',
+    opted_out: ci.opted   !== '' ? ['yes','true','1','y'].includes((r[+ci.opted]||'').toLowerCase()) : false,
+    status: 'pending',
+    selected: false,
+    tags: [...pendingTags],
+  }));
+  leads = newLeads;
+  updateNavBadges();
+  renderKanban();
+  refreshTagFilterBar();
+  document.getElementById('import-status').textContent = `✅ ${leads.length} leads imported`;
+  toast(`✅ ${leads.length} leads imported — go to Kanban`);
+}
+
+/* ═══════════════════════════════════════════════════
+   KANBAN
+═══════════════════════════════════════════════════ */
+function getColForLead(l) {
+  return COLS.find(col => {
+    const stage = (l.stage || '').toLowerCase().replace(/[\s-]/g,'_');
+    const colId = col.id.toLowerCase();
+    return stage.includes(colId) || colId.includes(stage) ||
+           l.stage.toLowerCase() === col.label.toLowerCase() ||
+           (col.id === 'cold_call' && (!l.stage || l.stage.toLowerCase().includes('cold')));
+  }) || COLS[0];
+}
+
+function renderKanban() {
+  const q = document.getElementById('k-search').value.toLowerCase();
+  const board = document.getElementById('kanban-board');
+  board.innerHTML = '';
+
+  COLS.forEach(col => {
+    let colLeads = leads.filter(l => getColForLead(l).id === col.id);
+    if (q) colLeads = colLeads.filter(l =>
+      `${l.name} ${l.phone} ${l.address}`.toLowerCase().includes(q));
+    if (activeTagFilter) colLeads = colLeads.filter(l =>
+      (l.tags||[]).includes(activeTagFilter));
+
+    const allColSelected = colLeads.length > 0 && colLeads.every(l => l.selected);
+    const someColSelected = !allColSelected && colLeads.some(l => l.selected);
+    const selCount = colLeads.filter(l => l.selected).length;
+
+    const colEl = document.createElement('div');
+    colEl.className = 'k-col';
+    colEl.style.setProperty('--col-color', col.color);
+    colEl.dataset.colId = col.id;
+
+    const head = document.createElement('div');
+    head.className = 'k-col-head';
+    head.style.setProperty('--col-color', col.textColor);
+    head.innerHTML = `
+      <span class="col-title">${col.label}</span>
+      <span class="col-count">${colLeads.length}</span>
+      ${colLeads.length > 0 ? `
+      <label class="k-col-checkbox-wrap ${allColSelected?'all-sel':''}" title="Select all ${col.label} leads" onclick="event.preventDefault();selectPhase('${col.id}')">
+        <input type="checkbox" ${allColSelected?'checked':''} style="${someColSelected?'opacity:.5':''}" readonly />
+        <span>${(allColSelected||someColSelected) ? selCount+'/'+colLeads.length : 'Select all'}</span>
+      </label>` : ''}
+    `;
+    colEl.appendChild(head);
+
+    const cardsEl = document.createElement('div');
+    cardsEl.className = 'k-cards';
+    cardsEl.id = 'cards-' + col.id;
+    cardsEl.dataset.colId = col.id;
+
+    // Drop zone events
+    cardsEl.addEventListener('dragover', onDragOver);
+    cardsEl.addEventListener('dragleave', onDragLeave);
+    cardsEl.addEventListener('drop', onDrop);
+
+    if (colLeads.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'k-empty';
+      empty.textContent = 'Drop leads here';
+      cardsEl.appendChild(empty);
+    } else {
+      colLeads.forEach(l => cardsEl.appendChild(buildCard(l, col)));
+    }
+
+    colEl.appendChild(cardsEl);
+    board.appendChild(colEl);
+  });
+
+  updateSelCount();
+}
+
+function buildCard(l, col) {
+  const statusCls = statusColors[l.status] || 'sb-pending';
+  const statusLabel = l.status.charAt(0).toUpperCase() + l.status.slice(1);
+
+  const card = document.createElement('div');
+  card.className = 'k-card' + (l.selected ? ' selected' : '');
+  card.style.setProperty('--col-color', col.textColor);
+  card.setAttribute('draggable', 'true');
+  card.dataset.leadId = l.id;
+
+  card.innerHTML = `
+    <input type="checkbox" class="k-card-check" ${l.selected?'checked':''} onclick="event.stopPropagation();toggleCard(${l.id})" />
+    <div class="k-card-name">
+      ${esc(l.name)||'<span style="color:var(--muted)">No name</span>'}
+      ${l.opted_out ? '<span title="Opted out" style="font-size:11px;">🚫</span>' : ''}
+    </div>
+    <div class="k-card-phone">${esc(l.phone)||'—'}</div>
+    <div class="k-card-addr">${esc(l.address)}</div>
+    <div class="k-card-footer">
+      <span class="k-badge s-badge ${statusCls}"><span class="sb-dot"></span>${statusLabel}</span>
+      ${(l.tags||[]).map(t => `<span class="k-lead-tag">${esc(t)}</span>`).join('')}
+    </div>
+  `;
+
+  card.addEventListener('click', () => toggleCard(l.id));
+  card.addEventListener('dragstart', onDragStart);
+  card.addEventListener('dragend', onDragEnd);
+  return card;
+}
+
+// ── DRAG & DROP ──────────────────────────────────────
+let dragLeadId = null;
+
+function onDragStart(e) {
+  dragLeadId = +this.dataset.leadId;
+  this.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', dragLeadId);
+}
+
+function onDragEnd(e) {
+  this.classList.remove('dragging');
+  document.querySelectorAll('.k-cards').forEach(c => c.classList.remove('drag-over'));
+}
+
+function onDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  document.querySelectorAll('.k-cards').forEach(c => c.classList.remove('drag-over'));
+  this.classList.add('drag-over');
+}
+
+function onDragLeave(e) {
+  if (!this.contains(e.relatedTarget)) this.classList.remove('drag-over');
+}
+
+function onDrop(e) {
+  e.preventDefault();
+  this.classList.remove('drag-over');
+  const targetColId = this.dataset.colId;
+  const lead = leads.find(l => l.id === dragLeadId);
+  if (!lead || !targetColId) return;
+  const targetCol = COLS.find(c => c.id === targetColId);
+  if (!targetCol) return;
+  const prevStage = lead.stage;
+  lead.stage = targetCol.label;
+  renderKanban();
+  if (prevStage !== lead.stage)
+    toast(`↔ ${lead.name||lead.phone} → ${targetCol.label}`);
+  dragLeadId = null;
+}
+
+function toggleCard(id) {
+  const l = leads.find(x => x.id === id);
+  if (l) { l.selected = !l.selected; renderKanban(); }
+}
+
+function selectAllVisible() {
+  const q = document.getElementById('k-search').value.toLowerCase();
+  leads.forEach(l => {
+    if (!q || `${l.name} ${l.phone} ${l.address}`.toLowerCase().includes(q)) l.selected = true;
+  });
+  renderKanban();
+}
+
+function selectPhase(colId) {
+  const col = COLS.find(c => c.id === colId);
+  if (!col) return;
+  // Get leads that belong to this column using same matching logic
+  const phaseLeads = leads.filter(l => {
+    const stage = (l.stage || '').toLowerCase().replace(/[\s-]/g,'_');
+    return stage.includes(colId) || colId.includes(stage) ||
+           l.stage.toLowerCase() === col.label.toLowerCase() ||
+           (colId === 'cold_call' && (!l.stage || l.stage.toLowerCase().includes('cold')));
+  });
+  // If all already selected → deselect the phase; otherwise select all
+  const allSelected = phaseLeads.length > 0 && phaseLeads.every(l => l.selected);
+  phaseLeads.forEach(l => l.selected = !allSelected);
+  renderKanban();
+  const n = phaseLeads.filter(l => l.selected).length;
+  toast(allSelected
+    ? `Deselected ${phaseLeads.length} ${col.label} leads`
+    : `✅ Selected ${n} ${col.label} lead${n !== 1 ? 's' : ''}`
+  );
+}
+
+function clearSelection() {
+  leads.forEach(l => l.selected = false);
+  renderKanban();
+}
+
+function updateSelCount() {
+  const n = leads.filter(l=>l.selected).length;
+  document.getElementById('sel-count').textContent = n;
+  document.getElementById('hdr-sel').textContent = n;
+  document.getElementById('hdr-total').textContent = leads.length;
+  document.getElementById('send-sel-btn').disabled = n === 0;
+  document.getElementById('nb-kanban').textContent = leads.length;
+  const nb = document.getElementById('nb-send');
+  if (n > 0) { nb.style.display=''; nb.textContent = n; }
+  else nb.style.display = 'none';
+}
+
+function updateNavBadges() {
+  document.getElementById('nb-kanban').textContent = leads.length;
+  document.getElementById('hdr-total').textContent = leads.length;
+}
+
+/* ═══════════════════════════════════════════════════
+   TEMPLATE
+═══════════════════════════════════════════════════ */
+const templateEl = document.getElementById('template');
+
+function onTemplateInput() {
+  const len = templateEl.value.length;
+  const segs = Math.ceil(len / 160) || 1;
+  const el = document.getElementById('char-count');
+  el.textContent = `${len} chars · ${segs} SMS segment${segs>1?'s':''}`;
+  const bar = document.getElementById('char-bar');
+  bar.className = 'char-bar' + (len > 320 ? ' over' : len > 160 ? ' warn' : '');
+  updatePreview();
+}
+
+function insertTag(tag) {
+  const s = templateEl.selectionStart, e = templateEl.selectionEnd;
+  templateEl.value = templateEl.value.slice(0,s) + tag + templateEl.value.slice(e);
+  templateEl.selectionStart = templateEl.selectionEnd = s + tag.length;
+  templateEl.focus();
+  onTemplateInput();
+}
+
+function updatePreview() {
+  const sample = leads.find(l=>l.selected) || leads[0];
+  if (!sample) { document.getElementById('preview-box').textContent = 'Import leads first.'; return; }
+  document.getElementById('preview-box').textContent = mergeTemplate(sample);
+}
+
+function mergeTemplate(lead) {
+  const city = (lead.address.match(/,\s*([A-Za-z ]+)(?:,|\s+\w{2}\b)/) || [])[1]?.trim() || '';
+  let msg = templateEl.value
+    .replace(/\{name\}/gi, lead.name || 'there')
+    .replace(/\{address\}/gi, lead.address || '')
+    .replace(/\{city\}/gi, city)
+    .replace(/\{phone\}/gi, lead.phone || '')
+    .replace(/\{stage\}/gi, lead.stage || '');
+  const footer = document.getElementById('s-footer')?.value || 'Reply STOP to opt out.';
+  const autoFooter = document.getElementById('auto-footer')?.checked;
+  if (autoFooter && footer && !msg.includes(footer)) msg += '\n' + footer;
+  return msg;
+}
+
+/* ═══════════════════════════════════════════════════
+   SEND PAGE
+═══════════════════════════════════════════════════ */
+function renderSendPage() {
+  const selected = leads.filter(l => l.selected);
+  document.getElementById('st-queue').textContent = selected.length;
+  document.getElementById('st-sent').textContent  = leads.filter(l=>l.status==='sent').length;
+  document.getElementById('st-fail').textContent  = leads.filter(l=>l.status==='failed').length;
+  document.getElementById('send-btn').disabled = selected.length === 0 || sending;
+
+  const tbody = document.getElementById('queue-tbody');
+  if (!selected.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted);">No leads selected — go to Kanban and select leads first.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = selected.map(l => `
+    <tr>
+      <td>${esc(l.name)||'—'}</td>
+      <td class="mono">${esc(l.phone)}</td>
+      <td style="font-size:11px;color:var(--muted)">${esc(l.address)}</td>
+      <td style="font-size:11px;color:var(--muted)">${esc(l.stage)}</td>
+      <td style="text-align:center">${l.opted_out?'🚫':'—'}</td>
+      <td><span class="s-badge ${statusColors[l.status]||'sb-pending'}"><span class="sb-dot"></span>${l.status}</span></td>
+    </tr>
+  `).join('');
+}
+
+function resetStatuses() {
+  leads.forEach(l => { if (l.status !== 'pending') l.status = 'pending'; });
+  renderSendPage();
+  renderKanban();
+  toast('Statuses reset to Pending');
+}
+
+async function startSend() {
+  const queue = leads.filter(l => l.selected);
+  if (!queue.length) { toast('No leads selected.'); return; }
+  if (!templateEl.value.trim()) { toast('⚠️ Write a message template on the Compose page first.'); goPage('compose', document.querySelector('[data-page=compose]')); return; }
+
+  abortSend = false;
+  sending = true;
+  document.getElementById('send-btn').style.display = 'none';
+  document.getElementById('cancel-btn').style.display = '';
+  document.getElementById('reset-btn').disabled = true;
+
+  const logEl = document.getElementById('log-wrap');
+  logEl.innerHTML = '';
+
+  function addLog(cls, msg) {
+    const d = document.createElement('div');
+    d.className = cls;
+    d.textContent = new Date().toLocaleTimeString('en-US',{hour12:false}) + '  ' + msg;
+    logEl.appendChild(d);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  const delay = parseInt(document.getElementById('delay-sec').value) * 1000;
+  const skipOpted  = document.getElementById('t-skip-opted').checked;
+  const skipNoPhone= document.getElementById('t-skip-nophone').checked;
+  const skipSent   = document.getElementById('t-skip-sent').checked;
+  const doLog      = document.getElementById('t-console').checked;
+
+  addLog('log-info', `▶  Starting — ${queue.length} leads queued · provider: ${currentProv}`);
+
+  let sent = 0, failed = 0, skipped = 0;
+
+  for (let i = 0; i < queue.length; i++) {
+    if (abortSend) { addLog('log-warn', '⛔  Send cancelled by user.'); break; }
+
+    const lead = queue[i];
+    const pct = Math.round(((i + 1) / queue.length) * 100);
+    document.getElementById('prog-bar').style.width = pct + '%';
+    document.getElementById('prog-label').textContent = `${i+1} of ${queue.length} (${pct}%)  ·  ${sent} sent · ${failed} failed · ${skipped} skipped`;
+
+    // Skip checks
+    if (skipOpted && lead.opted_out) {
+      lead.status = 'skipped'; skipped++;
+      addLog('log-skip', `⊘  Skipped (opted out): ${lead.name || lead.phone}`);
+      renderSendPage(); continue;
+    }
+    if (skipNoPhone && !lead.phone) {
+      lead.status = 'skipped'; skipped++;
+      addLog('log-skip', `⊘  Skipped (no phone): ${lead.name}`);
+      renderSendPage(); continue;
+    }
+    if (skipSent && lead.status === 'sent') {
+      skipped++;
+      addLog('log-skip', `⊘  Skipped (already sent): ${lead.name || lead.phone}`);
+      continue;
+    }
+
+    const msg = mergeTemplate(lead);
+    addLog('log-info', `→  ${lead.name||lead.phone}: "${msg.slice(0,70)}${msg.length>70?'…':''}"`);
+    if (doLog) console.log('[Bluebird SMS]', lead, msg);
+
+    const result = await sendSMS(lead, msg);
+
+    if (result.ok) {
+      lead.status = 'sent';
+      lead.stage = 'Contacted';
+      sent++;
+      addLog('log-sent', `✓  Sent → ${lead.phone} · moved to Contacted`);
+    } else {
+      lead.status = 'failed'; failed++;
+      addLog('log-fail', `✗  Failed → ${lead.phone}: ${result.error||''}`);
+    }
+
+    renderSendPage();
+    if (i < queue.length - 1 && !abortSend) await sleep(delay);
+  }
+
+  addLog('log-info', `■  Done — ${sent} sent · ${failed} failed · ${skipped} skipped`);
+  document.getElementById('prog-label').textContent = `Complete — ${sent} sent · ${failed} failed · ${skipped} skipped`;
+  document.getElementById('send-btn').style.display = '';
+  document.getElementById('cancel-btn').style.display = 'none';
+  document.getElementById('reset-btn').disabled = false;
+  sending = false;
+  document.getElementById('send-btn').disabled = false;
+  renderKanban();
+  toast(`✅ Done — ${sent} sent · ${failed} failed · ${skipped} skipped`);
+}
+
+function cancelSend() { abortSend = true; }
+
+/* ═══════════════════════════════════════════════════
+   SMS PROVIDER DISPATCH
+═══════════════════════════════════════════════════ */
+async function sendSMS(lead, message) {
+  try {
+    if (currentProv === 'demo') return await demoSend(lead, message);
+    if (currentProv === 'twilio') return await twilioSend(lead, message);
+    if (currentProv === 'zoom') return await zoomSend(lead, message);
+    if (currentProv === 'openphone') return await openphoneSend(lead, message);
+    return {ok:false, error:'Unknown provider'};
+  } catch(e) {
+    return {ok:false, error: e.message};
+  }
+}
+
+function demoSend(lead, message) {
+  return new Promise(res => setTimeout(() => res({ok: Math.random() > 0.08}), 250 + Math.random()*200));
+}
+
+async function twilioSend(lead, message) {
+  const sid   = document.getElementById('twilio-sid').value.trim();
+  const token = document.getElementById('twilio-token').value.trim();
+  const from  = document.getElementById('twilio-from').value.trim();
+  if (!sid || !token || !from) return {ok:false, error:'Twilio credentials not set (go to Settings)'};
+  const body = new URLSearchParams({ To: lead.phone, From: from, Body: message });
+  const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
+    method: 'POST',
+    headers: { Authorization: 'Basic ' + btoa(sid + ':' + token), 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: body.toString(),
+  });
+  if (res.ok) return {ok:true};
+  const err = await res.json().catch(()=>({}));
+  return {ok:false, error: err.message || res.statusText};
+}
+
+async function zoomSend(lead, message) {
+  const acct   = document.getElementById('zoom-acct').value.trim();
+  const client = document.getElementById('zoom-client').value.trim();
+  const secret = document.getElementById('zoom-secret').value.trim();
+  const from   = document.getElementById('zoom-from').value.trim();
+  if (!acct||!client||!secret||!from) return {ok:false,error:'Zoom credentials not set'};
+  // Get OAuth token
+  const tokenRes = await fetch('https://zoom.us/oauth/token?grant_type=account_credentials&account_id='+acct, {
+    method:'POST', headers:{Authorization:'Basic '+btoa(client+':'+secret)}
+  });
+  if (!tokenRes.ok) return {ok:false, error:'Zoom token error'};
+  const {access_token} = await tokenRes.json();
+  const smsRes = await fetch('https://api.zoom.us/v2/phone/sms/sessions', {
+    method:'POST',
+    headers:{'Authorization':'Bearer '+access_token,'Content-Type':'application/json'},
+    body: JSON.stringify({ message, to_number: lead.phone, from_number: from }),
+  });
+  return smsRes.ok ? {ok:true} : {ok:false, error:(await smsRes.json().catch(()=>({}))).message};
+}
+
+async function openphoneSend(lead, message) {
+  const key  = document.getElementById('op-key').value.trim();
+  const from = document.getElementById('op-from').value.trim();
+  if (!key||!from) return {ok:false,error:'OpenPhone credentials not set'};
+  const res = await fetch('https://api.openphone.com/v1/messages', {
+    method:'POST',
+    headers:{'Authorization':key,'Content-Type':'application/json'},
+    body: JSON.stringify({ content: message, to: [lead.phone], from }),
+  });
+  return res.ok ? {ok:true} : {ok:false,error:(await res.json().catch(()=>({}))).message};
+}
+
+/* ═══════════════════════════════════════════════════
+   SETTINGS
+═══════════════════════════════════════════════════ */
+function setProv(id, el) {
+  currentProv = id;
+  document.querySelectorAll('.prov-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  document.querySelectorAll('.provider-form').forEach(f => f.classList.remove('active'));
+  document.getElementById('prov-' + id).classList.add('active');
+}
+
+function saveSettings() {
+  const cfg = {
+    provider: currentProv,
+    twilio:  { sid: v('twilio-sid'), token: v('twilio-token'), from: v('twilio-from') },
+    zoom:    { acct: v('zoom-acct'), client: v('zoom-client'), secret: v('zoom-secret'), from: v('zoom-from') },
+    op:      { key: v('op-key'), from: v('op-from') },
+    sender:  { name: v('s-name'), company: v('s-company'), footer: v('s-footer'), autoFooter: document.getElementById('auto-footer').checked },
+    behavior:{ skipOpted: document.getElementById('t-skip-opted').checked, skipNoPhone: document.getElementById('t-skip-nophone').checked, skipSent: document.getElementById('t-skip-sent').checked, consoleLog: document.getElementById('t-console').checked },
+  };
+  try { localStorage.setItem('bb_sms_cfg', JSON.stringify(cfg)); } catch(e){}
+  toast('✅ Settings saved');
+}
+
+function loadSettings() {
+  try {
+    const cfg = JSON.parse(localStorage.getItem('bb_sms_cfg') || 'null');
+    if (!cfg) return;
+    currentProv = cfg.provider || 'demo';
+    document.querySelectorAll('.prov-tab').forEach(t => { if (t.textContent.toLowerCase().includes(currentProv)) t.click(); });
+    if (cfg.twilio) { sv('twilio-sid',cfg.twilio.sid); sv('twilio-token',cfg.twilio.token); sv('twilio-from',cfg.twilio.from); }
+    if (cfg.zoom)   { sv('zoom-acct',cfg.zoom.acct); sv('zoom-client',cfg.zoom.client); sv('zoom-secret',cfg.zoom.secret); sv('zoom-from',cfg.zoom.from); }
+    if (cfg.op)     { sv('op-key',cfg.op.key); sv('op-from',cfg.op.from); }
+    if (cfg.sender) { sv('s-name',cfg.sender.name); sv('s-company',cfg.sender.company); sv('s-footer',cfg.sender.footer); document.getElementById('auto-footer').checked = cfg.sender.autoFooter; }
+  } catch(e){}
+}
+
+function testProvider() {
+  toast(`🔌 Testing ${currentProv}… (check console for result)`);
+  console.log('[Bluebird] Test connection — provider:', currentProv);
+}
+
+/* ═══════════════════════════════════════════════════
+   UTILS
+═══════════════════════════════════════════════════ */
+function esc(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+function v(id){ return (document.getElementById(id)||{}).value||''; }
+function sv(id,val){ if(document.getElementById(id) && val) document.getElementById(id).value = val; }
+
+function exportCSV() {
+  if (!leads.length) { toast('No leads to export.'); return; }
+  const cols = ['name','phone','address','stage','opted_out','status','selected'];
+  const rows = [cols.join(','), ...leads.map(l => cols.map(c => `"${(l[c]||'')}"`).join(','))];
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([rows.join('\n')], {type:'text/csv'}));
+  a.download = `bluebird-sms-${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+}
+
+function clearAll() {
+  if (!leads.length) { toast('Nothing to clear.'); return; }
+  if (!confirm(`Clear all ${leads.length} leads? This cannot be undone.`)) return;
+  leads = [];
+  renderKanban();
+  updateNavBadges();
+  toast('All leads cleared.');
+}
+
+let _toastTimer;
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => t.classList.remove('show'), 3400);
+}
+
+/* ═══════════════════════════════════════════════════
+   TAG INPUT (Compose page)
+═══════════════════════════════════════════════════ */
+function renderPendingTags() {
+  const container = document.getElementById('tag-pills');
+  if (!container) return;
+  container.innerHTML = pendingTags.map((t, i) => `
+    <span class="tag-pill">
+      ${esc(t)}
+      <span class="tag-x" onclick="removeTag(${i})">×</span>
+    </span>
+  `).join('');
+}
+
+function addTag(raw) {
+  const tags = raw.split(/[,;]+/).map(t => t.trim()).filter(t => t.length > 0);
+  tags.forEach(t => {
+    if (!pendingTags.includes(t)) pendingTags.push(t);
+  });
+  renderPendingTags();
+}
+
+function removeTag(i) {
+  pendingTags.splice(i, 1);
+  renderPendingTags();
+}
+
+function addPresetTag(t) {
+  if (!pendingTags.includes(t)) { pendingTags.push(t); renderPendingTags(); }
+}
+
+// Wire tag text input
+document.addEventListener('DOMContentLoaded', () => {});
+(function wireTagInput() {
+  const inp = document.getElementById('tag-text');
+  if (!inp) return;
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      if (inp.value.trim()) { addTag(inp.value); inp.value = ''; }
+    } else if (e.key === 'Backspace' && !inp.value && pendingTags.length) {
+      pendingTags.pop(); renderPendingTags();
+    }
+  });
+  inp.addEventListener('blur', () => {
+    if (inp.value.trim()) { addTag(inp.value); inp.value = ''; }
+  });
+  // clicking the wrap focuses the input
+  document.getElementById('tag-input-wrap')?.addEventListener('click', () => inp.focus());
+})();
+
+/* ═══════════════════════════════════════════════════
+   TAG FILTER BAR (Kanban)
+═══════════════════════════════════════════════════ */
+function refreshTagFilterBar() {
+  const allTags = [...new Set(leads.flatMap(l => l.tags || []))].sort();
+  const bar = document.getElementById('tag-filter-bar');
+  const chips = document.getElementById('tag-filter-chips');
+  if (!allTags.length) { bar.style.display = 'none'; return; }
+  bar.style.display = 'flex';
+  chips.innerHTML = allTags.map(t => `
+    <button class="tag-filter-chip ${activeTagFilter===t?'active':''}" data-tag="${esc(t)}" onclick="setTagFilter('${esc(t)}',this)">${esc(t)}</button>
+  `).join('');
+}
+
+function setTagFilter(tag, el) {
+  activeTagFilter = tag;
+  document.querySelectorAll('.tag-filter-chip').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  renderKanban();
+}
+
+/* ═══════════════════════════════════════════════════
+   INIT
+═══════════════════════════════════════════════════ */
+loadSettings();
+renderKanban();
+</script>
+</body>
+</html>

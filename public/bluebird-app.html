@@ -408,6 +408,7 @@ select.field-input option{background:var(--navy-mid)}
     <h3>🚀 Send Controls</h3>
     <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:16px;">
       <div style="font-size:13px;color:var(--muted);">Delay between sends: <strong style="color:var(--white)">1.25s</strong> (fixed)</div>
+      <div style="font-size:13px;color:var(--muted);">Sending window: <strong style="color:var(--white)">7:00 PM – 6:00 AM</strong> Pakistan time</div>
       <button class="btn btn-green" id="send-btn" onclick="startSend()" disabled>🚀 Start Sending</button>
       <button class="btn btn-red" id="cancel-btn" onclick="cancelSend()" style="display:none;">⛔ Cancel</button>
       <button class="btn btn-ghost btn-sm" onclick="resetStatuses()" id="reset-btn">↺ Reset Statuses</button>
@@ -1052,9 +1053,29 @@ async function resetStatuses() {
   else toast('Statuses reset to Pending');
 }
 
+/* Sending window: 7:00 PM – 6:00 AM Pakistan time (UTC+5) */
+function pktMinutesNow() {
+  const d = new Date();
+  return (d.getUTCHours() * 60 + d.getUTCMinutes() + 300) % 1440;
+}
+function inSendWindow() {
+  const m = pktMinutesNow();
+  return m >= 19 * 60 || m < 6 * 60;
+}
+function sendWindowMessage() {
+  const mins = (19 * 60 - pktMinutesNow() + 1440) % 1440;
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return `⏰ Sending opens at 7:00 PM Pakistan time — ${h}h ${m}m from now`;
+}
+
 async function startSend() {
   const queue = leads.filter(l => l.selected);
   if (!queue.length) { toast('No leads selected.'); return; }
+  if (!inSendWindow()) {
+    toast(sendWindowMessage());
+    document.getElementById('prog-label').textContent = sendWindowMessage() + ' · window is 7:00 PM – 6:00 AM PKT';
+    return;
+  }
   if (!templateEl.value.trim()) { toast('⚠️ Write a message template on the Compose page first.'); goPage('compose', document.querySelector('[data-page=compose]')); return; }
 
   abortSend = false;
@@ -1086,6 +1107,10 @@ async function startSend() {
 
   for (let i = 0; i < queue.length; i++) {
     if (abortSend) { addLog('log-warn', '⛔  Send cancelled by user.'); break; }
+    if (!inSendWindow()) {
+      addLog('log-warn', '⏰  Sending window closed (7:00 PM – 6:00 AM PKT). Remaining leads stay pending — resend during the next window.');
+      break;
+    }
 
     const lead = queue[i];
     const pct = Math.round(((i + 1) / queue.length) * 100);

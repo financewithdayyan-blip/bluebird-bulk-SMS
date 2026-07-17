@@ -117,6 +117,19 @@ export default async function handler(req, res) {
     return;
   }
 
+  // Sending window: 7:00 PM – 6:00 AM Pakistan time (UTC+5, no DST).
+  // 6:00 AM PKT = 9:00 PM US Eastern, the TCPA quiet-hours cutoff.
+  const now = new Date();
+  const pktMinutes = (now.getUTCHours() * 60 + now.getUTCMinutes() + 300) % 1440;
+  const inWindow = pktMinutes >= 19 * 60 || pktMinutes < 6 * 60;
+  if (!inWindow) {
+    res.status(403).json({
+      ok: false,
+      error: 'Outside sending window — bulk SMS is allowed only 7:00 PM to 6:00 AM Pakistan time',
+    });
+    return;
+  }
+
   try {
     const token = await getAccessToken();
     const userId = await getSenderUserId(token);

@@ -401,11 +401,7 @@ select.field-input option{background:var(--navy-mid)}
   <div class="send-panel">
     <h3>🚀 Send Controls</h3>
     <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:16px;">
-      <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);">
-        Delay between sends:
-        <input type="number" class="field-input" id="delay-sec" value="3" min="1" max="60" style="width:72px;"/>
-        seconds
-      </div>
+      <div style="font-size:13px;color:var(--muted);">Delay between sends: <strong style="color:var(--white)">1.25s</strong> (fixed)</div>
       <button class="btn btn-green" id="send-btn" onclick="startSend()" disabled>🚀 Start Sending</button>
       <button class="btn btn-red" id="cancel-btn" onclick="cancelSend()" style="display:none;">⛔ Cancel</button>
       <button class="btn btn-ghost btn-sm" onclick="resetStatuses()" id="reset-btn">↺ Reset Statuses</button>
@@ -1072,7 +1068,7 @@ async function startSend() {
     logEl.scrollTop = logEl.scrollHeight;
   }
 
-  const delay = parseInt(document.getElementById('delay-sec').value) * 1000;
+  const delay = 1250; // fixed 1.25s between sends
   const skipOpted  = document.getElementById('t-skip-opted').checked;
   const skipNoPhone= document.getElementById('t-skip-nophone').checked;
   const skipSent   = document.getElementById('t-skip-sent').checked;

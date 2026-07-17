@@ -321,6 +321,7 @@ select.field-input option{background:var(--navy-mid)}
 ══════════════════════════════════════════════════════ -->
 <div class="page active" id="page-kanban">
   <div class="kanban-toolbar">
+    <button class="btn btn-brass btn-sm" onclick="openImportModal()">📂 Import CSV</button>
     <input class="kanban-search" id="k-search" placeholder="🔍  Search name, phone, address…" oninput="renderKanban()"/>
     <button class="btn btn-ghost btn-sm" onclick="selectAllVisible()">Select All</button>
     <button class="btn btn-ghost btn-sm" onclick="clearSelection()">✕ Clear</button>
@@ -348,52 +349,9 @@ select.field-input option{background:var(--navy-mid)}
 <div class="page" id="page-compose">
 <div class="compose-wrap">
 
-  <!-- Step 1: Upload -->
+  <!-- Step 1: Template -->
   <div class="compose-card">
-    <h3><span class="step-num">1</span> Upload Leads CSV</h3>
-    <div class="upload-zone" id="upload-zone">
-      <input type="file" id="csv-file" accept=".csv"/>
-      <div class="uz-icon">📂</div>
-      <p><strong>Click or drag</strong> a .csv file here</p>
-      <p style="margin-top:5px;font-size:11.5px;">Expected columns: name, phone, address, stage, opted_out</p>
-    </div>
-    <div id="map-section" style="display:none;margin-top:18px;">
-      <div class="section-label">Map CSV Columns</div>
-      <div class="map-grid">
-        <div class="map-field"><label>Name column</label><select class="field-input" id="col-name"></select></div>
-        <div class="map-field"><label>Phone column</label><select class="field-input" id="col-phone"></select></div>
-        <div class="map-field"><label>Address column</label><select class="field-input" id="col-address"></select></div>
-        <div class="map-field"><label>Stage column</label><select class="field-input" id="col-stage"></select></div>
-        <div class="map-field"><label>Opted-out column</label><select class="field-input" id="col-opted"></select></div>
-      </div>
-      <div style="margin-top:16px;">
-        <div class="section-label">Tag this batch</div>
-        <p style="font-size:11.5px;color:var(--muted);margin-bottom:10px;">Tags are applied to every lead in this upload. Type and press Enter or comma to add.</p>
-        <div class="tag-input-wrap" id="tag-input-wrap">
-          <div class="tag-pills" id="tag-pills"></div>
-          <input class="tag-text-input" id="tag-text" placeholder="e.g. NC Foreclosure, July Batch, Priority…" />
-        </div>
-        <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;" id="tag-presets">
-          <span style="font-size:10.5px;color:var(--muted);align-self:center;">Quick add:</span>
-          <button class="preset-tag-btn" onclick="addPresetTag('Pre-Foreclosure')">Pre-Foreclosure</button>
-          <button class="preset-tag-btn" onclick="addPresetTag('Probate')">Probate</button>
-          <button class="preset-tag-btn" onclick="addPresetTag('Tax Delinquent')">Tax Delinquent</button>
-          <button class="preset-tag-btn" onclick="addPresetTag('Lis Pendens')">Lis Pendens</button>
-          <button class="preset-tag-btn" onclick="addPresetTag('Code Violation')">Code Violation</button>
-          <button class="preset-tag-btn" onclick="addPresetTag('Eviction')">Eviction</button>
-          <button class="preset-tag-btn" onclick="addPresetTag('Priority')">Priority</button>
-        </div>
-      </div>
-      <div style="margin-top:16px;display:flex;gap:10px;">
-        <button class="btn btn-brass" id="import-btn" onclick="importLeads()">Import Leads →</button>
-        <span id="import-status" style="font-size:12px;color:var(--muted);align-self:center;"></span>
-      </div>
-    </div>
-  </div>
-
-  <!-- Step 2: Template -->
-  <div class="compose-card">
-    <h3><span class="step-num">2</span> Message Template</h3>
+    <h3><span class="step-num">1</span> Message Template</h3>
     <textarea class="template-area" id="template" oninput="onTemplateInput()" placeholder="Hi {name}, this is Dayyan from Bluebird Acquisitions. We buy houses in any condition in {city}. Interested in a cash offer for {address}?"></textarea>
     <div class="char-bar" id="char-bar"><span id="char-count">0 chars · 1 segment</span></div>
     <div class="tag-row">
@@ -405,9 +363,9 @@ select.field-input option{background:var(--navy-mid)}
     </div>
   </div>
 
-  <!-- Step 3: Preview -->
+  <!-- Step 2: Preview -->
   <div class="compose-card">
-    <h3><span class="step-num">3</span> Preview Message</h3>
+    <h3><span class="step-num">2</span> Preview Message</h3>
     <p style="font-size:12px;color:var(--muted);margin-bottom:10px;">Showing merged for first selected lead (or first lead if none selected)</p>
     <div class="preview-box" id="preview-box">Write a template above to see a preview.</div>
     <div style="margin-top:14px;">
@@ -583,6 +541,53 @@ select.field-input option{background:var(--navy-mid)}
 </div>
 </div>
 
+<!-- ── IMPORT CSV MODAL ─────────────────────────────────── -->
+<div class="modal-bg" id="import-modal">
+  <div class="modal" style="width:580px;max-height:92vh;overflow-y:auto;">
+    <h2>📂 Import Leads CSV</h2>
+    <div class="upload-zone" id="upload-zone">
+      <input type="file" id="csv-file" accept=".csv"/>
+      <div class="uz-icon">📂</div>
+      <p><strong>Click or drag</strong> a .csv file here</p>
+      <p style="margin-top:5px;font-size:11.5px;">Expected columns: name, phone, address, stage, opted_out</p>
+    </div>
+    <div id="map-section" style="display:none;margin-top:18px;">
+      <div class="section-label">Map CSV Columns</div>
+      <div class="map-grid">
+        <div class="map-field"><label>Name column</label><select class="field-input" id="col-name"></select></div>
+        <div class="map-field"><label>Phone column</label><select class="field-input" id="col-phone"></select></div>
+        <div class="map-field"><label>Address column</label><select class="field-input" id="col-address"></select></div>
+        <div class="map-field"><label>Stage column</label><select class="field-input" id="col-stage"></select></div>
+        <div class="map-field"><label>Opted-out column</label><select class="field-input" id="col-opted"></select></div>
+      </div>
+      <div style="margin-top:16px;">
+        <div class="section-label">Tag this batch</div>
+        <p style="font-size:11.5px;color:var(--muted);margin-bottom:10px;">Tags are applied to every lead in this upload. Type and press Enter or comma to add.</p>
+        <div class="tag-input-wrap" id="tag-input-wrap">
+          <div class="tag-pills" id="tag-pills"></div>
+          <input class="tag-text-input" id="tag-text" placeholder="e.g. NC Foreclosure, July Batch, Priority…" />
+        </div>
+        <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;" id="tag-presets">
+          <span style="font-size:10.5px;color:var(--muted);align-self:center;">Quick add:</span>
+          <button class="preset-tag-btn" onclick="addPresetTag('Pre-Foreclosure')">Pre-Foreclosure</button>
+          <button class="preset-tag-btn" onclick="addPresetTag('Probate')">Probate</button>
+          <button class="preset-tag-btn" onclick="addPresetTag('Tax Delinquent')">Tax Delinquent</button>
+          <button class="preset-tag-btn" onclick="addPresetTag('Lis Pendens')">Lis Pendens</button>
+          <button class="preset-tag-btn" onclick="addPresetTag('Code Violation')">Code Violation</button>
+          <button class="preset-tag-btn" onclick="addPresetTag('Eviction')">Eviction</button>
+          <button class="preset-tag-btn" onclick="addPresetTag('Priority')">Priority</button>
+        </div>
+      </div>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:10px;align-items:center;">
+      <button class="btn btn-brass" id="import-btn" onclick="importLeads()">Import Leads →</button>
+      <span id="import-status" style="font-size:12px;color:var(--muted);"></span>
+      <div style="flex:1"></div>
+      <button class="btn btn-ghost" onclick="closeImportModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── TOAST ──────────────────────────────────────────────── -->
 <div id="toast"></div>
 
@@ -725,8 +730,28 @@ async function importLeads() {
   updateNavBadges();
   renderKanban();
   refreshTagFilterBar();
-  document.getElementById('import-status').textContent = `✅ ${data.length} leads imported`;
-  toast(`✅ ${data.length} leads imported — go to Kanban`);
+  toast(`✅ ${data.length} leads imported`);
+  closeImportModal();
+  resetImportUI();
+}
+
+function openImportModal() {
+  document.getElementById('import-modal').classList.add('open');
+}
+
+function closeImportModal() {
+  document.getElementById('import-modal').classList.remove('open');
+}
+
+function resetImportUI() {
+  csvRaw = [];
+  pendingTags = [];
+  renderPendingTags();
+  document.getElementById('csv-file').value = '';
+  document.getElementById('map-section').style.display = 'none';
+  document.getElementById('import-status').textContent = '';
+  uploadZone.querySelector('.uz-icon').textContent = '📂';
+  uploadZone.querySelector('p').innerHTML = '<strong>Click or drag</strong> a .csv file here';
 }
 
 /* ═══════════════════════════════════════════════════

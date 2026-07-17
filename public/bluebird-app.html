@@ -352,6 +352,12 @@ select.field-input option{background:var(--navy-mid)}
   <!-- Step 1: Template -->
   <div class="compose-card">
     <h3><span class="step-num">1</span> Message Template</h3>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+      <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);">Template for tag:</span>
+      <select class="field-input" id="tmpl-tag" style="width:auto;min-width:180px;" onchange="loadTemplateForTag()"></select>
+      <button class="btn btn-ghost btn-sm" onclick="saveTemplateForTag()">💾 Save for this tag</button>
+      <span id="tmpl-status" style="font-size:11.5px;color:var(--muted);"></span>
+    </div>
     <textarea class="template-area" id="template" oninput="onTemplateInput()" placeholder="Hi {name}, this is Dayyan from Bluebird Acquisitions. We buy houses in any condition in {city}. Interested in a cash offer for {address}?"></textarea>
     <div class="char-bar" id="char-bar"><span id="char-count">0 chars · 1 segment</span></div>
     <div class="tag-row">
@@ -1345,6 +1351,7 @@ document.addEventListener('DOMContentLoaded', () => {});
    TAG FILTER BAR (Kanban)
 ═══════════════════════════════════════════════════ */
 function refreshTagFilterBar() {
+  refreshTemplateSelect();
   const allTags = [...new Set(leads.flatMap(l => l.tags || []))].sort();
   const bar = document.getElementById('tag-filter-bar');
   const chips = document.getElementById('tag-filter-chips');
@@ -1390,7 +1397,7 @@ function applySession(session) {
   document.getElementById('signout-btn').style.display = session ? '' : 'none';
   if (session) {
     document.getElementById('nav-user-email').textContent = session.user.email;
-    if (session.user.id !== prevUserId) loadLeads();
+    if (session.user.id !== prevUserId) { loadLeads(); loadTemplates(); }
   } else if (prevUserId) {
     leads = [];
     renderKanban(); updateNavBadges(); refreshTagFilterBar();
@@ -1408,6 +1415,56 @@ async function loadLeads() {
 async function dbUpdate(id, fields) {
   const { error } = await sb.from('leads').update(fields).eq('id', id);
   if (error) toast('⚠️ Save failed: ' + error.message);
+}
+
+/* ── SAVED TEMPLATES (per tag, Supabase) ── */
+let savedTemplates = {}; // tag → body
+
+async function loadTemplates() {
+  const { data, error } = await sb.from('sms_templates').select('tag, body');
+  if (error) { toast('⚠️ Failed to load templates: ' + error.message); return; }
+  savedTemplates = Object.fromEntries(data.map(t => [t.tag, t.body]));
+  refreshTemplateSelect();
+}
+
+function refreshTemplateSelect() {
+  const sel = document.getElementById('tmpl-tag');
+  const current = sel.value;
+  const tags = [...new Set([
+    'Default',
+    ...leads.flatMap(l => l.tags || []),
+    ...Object.keys(savedTemplates),
+  ])].sort((a, b) => a === 'Default' ? -1 : b === 'Default' ? 1 : a.localeCompare(b));
+  sel.innerHTML = tags.map(t =>
+    `<option value="${esc(t)}">${esc(t)}${savedTemplates[t] !== undefined ? ' ✓' : ''}</option>`
+  ).join('');
+  if (tags.includes(current)) sel.value = current;
+}
+
+function loadTemplateForTag() {
+  const tag = document.getElementById('tmpl-tag').value;
+  const status = document.getElementById('tmpl-status');
+  if (savedTemplates[tag] !== undefined) {
+    templateEl.value = savedTemplates[tag];
+    onTemplateInput();
+    status.textContent = `Loaded "${tag}" template`;
+  } else {
+    status.textContent = `No saved template for "${tag}" yet — write one and hit Save`;
+  }
+}
+
+async function saveTemplateForTag() {
+  const tag = document.getElementById('tmpl-tag').value;
+  const body = templateEl.value;
+  if (!tag) { toast('Pick a tag first.'); return; }
+  if (!body.trim()) { toast('⚠️ Template is empty — write a message first.'); return; }
+  const { error } = await sb.from('sms_templates')
+    .upsert({ tag, body, updated_at: new Date().toISOString() }, { onConflict: 'user_id,tag' });
+  if (error) { toast('⚠️ Save failed: ' + error.message); return; }
+  savedTemplates[tag] = body;
+  refreshTemplateSelect();
+  document.getElementById('tmpl-status').textContent = `Saved ✓`;
+  toast(`💾 Template saved for "${tag}"`);
 }
 
 function authToken() { return sbSession ? sbSession.access_token : ''; }

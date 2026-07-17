@@ -352,7 +352,7 @@ select.field-input option{background:var(--navy-mid)}
   <!-- Step 2: Template -->
   <div class="compose-card">
     <h3><span class="step-num">2</span> Message Template</h3>
-    <textarea class="template-area" id="template" oninput="onTemplateInput()" placeholder="Hi {name}, this is Dayyan from Bluebird Acquisitions. We buy houses in any condition in {city}. Interested in a cash offer for {address}? Reply STOP to opt out."></textarea>
+    <textarea class="template-area" id="template" oninput="onTemplateInput()" placeholder="Hi {name}, this is Dayyan from Bluebird Acquisitions. We buy houses in any condition in {city}. Interested in a cash offer for {address}?"></textarea>
     <div class="char-bar" id="char-bar"><span id="char-count">0 chars · 1 segment</span></div>
     <div class="tag-row">
       <span class="tag-chip" onclick="insertTag('{name}')">&#x7B;name&#x7D;</span>
@@ -490,11 +490,7 @@ select.field-input option{background:var(--navy-mid)}
         <div class="field"><label>Sender Name</label><input class="field-input" id="s-name" placeholder="Dayyan — Bluebird Acquisitions" /></div>
         <div class="field"><label>Company</label><input class="field-input" id="s-company" placeholder="Bluebird Acquisitions" /></div>
       </div>
-      <div class="field"><label>Default opt-out footer</label><input class="field-input" id="s-footer" placeholder="Reply STOP to opt out." /></div>
-      <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);">
-        <input type="checkbox" id="auto-footer" checked />
-        <label for="auto-footer">Auto-append opt-out footer to every message</label>
-      </div>
+      <p class="field-desc">Opt-out wording is added automatically by Zoom on every outbound SMS — no footer is appended by this app.</p>
     </div>
     <div class="save-row"><button class="btn btn-brass" onclick="saveSettings()">Save</button></div>
   </div>
@@ -924,9 +920,6 @@ function mergeTemplate(lead) {
     .replace(/\{city\}/gi, city)
     .replace(/\{phone\}/gi, lead.phone || '')
     .replace(/\{stage\}/gi, lead.stage || '');
-  const footer = document.getElementById('s-footer')?.value || 'Reply STOP to opt out.';
-  const autoFooter = document.getElementById('auto-footer')?.checked;
-  if (autoFooter && footer && !msg.includes(footer)) msg += '\n' + footer;
   return msg;
 }
 
@@ -1128,7 +1121,7 @@ function saveSettings() {
     provider: currentProv,
     twilio:  { sid: v('twilio-sid'), token: v('twilio-token'), from: v('twilio-from') },
     op:      { key: v('op-key'), from: v('op-from') },
-    sender:  { name: v('s-name'), company: v('s-company'), footer: v('s-footer'), autoFooter: document.getElementById('auto-footer').checked },
+    sender:  { name: v('s-name'), company: v('s-company') },
     behavior:{ skipOpted: document.getElementById('t-skip-opted').checked, skipNoPhone: document.getElementById('t-skip-nophone').checked, skipSent: document.getElementById('t-skip-sent').checked, consoleLog: document.getElementById('t-console').checked },
   };
   try { localStorage.setItem('bb_sms_cfg', JSON.stringify(cfg)); } catch(e){}
@@ -1143,7 +1136,7 @@ function loadSettings() {
     document.querySelectorAll('.prov-tab').forEach(t => { if (t.textContent.toLowerCase().includes(currentProv)) t.click(); });
     if (cfg.twilio) { sv('twilio-sid',cfg.twilio.sid); sv('twilio-token',cfg.twilio.token); sv('twilio-from',cfg.twilio.from); }
     if (cfg.op)     { sv('op-key',cfg.op.key); sv('op-from',cfg.op.from); }
-    if (cfg.sender) { sv('s-name',cfg.sender.name); sv('s-company',cfg.sender.company); sv('s-footer',cfg.sender.footer); document.getElementById('auto-footer').checked = cfg.sender.autoFooter; }
+    if (cfg.sender) { sv('s-name',cfg.sender.name); sv('s-company',cfg.sender.company); }
   } catch(e){}
 }
 

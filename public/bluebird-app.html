@@ -455,11 +455,12 @@ select.field-input option{background:var(--navy-mid)}
     </div>
 
     <div class="provider-form" id="prov-zoom">
-      <div class="field"><label>Account ID</label><input class="field-input key-field" id="zoom-acct" placeholder="your_zoom_account_id" /></div>
-      <div class="field"><label>Client ID</label><input class="field-input key-field" id="zoom-client" placeholder="your_client_id" /></div>
-      <div class="field"><label>Client Secret</label><input class="field-input key-field" id="zoom-secret" type="password" placeholder="••••••••••••••••" /></div>
-      <div class="field"><label>From Number (E.164)</label><input class="field-input key-field" id="zoom-from" placeholder="+12145550000" /></div>
-      <p class="field-desc">Uses Zoom Phone SMS API — <code>POST /v2/phone/sms/sessions</code>.</p>
+      <div style="padding:16px;background:rgba(26,86,219,.07);border-radius:var(--r);border-left:3px solid var(--brass);font-size:13px;color:var(--muted);line-height:1.7;">
+        <strong style="color:var(--brass-light);">Configured server-side</strong><br/>
+        Zoom credentials are never stored in the browser. Set these in <code>.env.local</code> (and in Vercel → Project → Environment Variables for production):<br/>
+        <code>ZOOM_ACCOUNT_ID</code> · <code>ZOOM_CLIENT_ID</code> · <code>ZOOM_CLIENT_SECRET</code> · <code>ZOOM_FROM_NUMBER</code> · <code>ZOOM_USER_EMAIL</code><br/>
+        Sends via <code>POST /v2/phone/sms/messages</code> through this app's <code>/api/send-sms</code> route. Use <em>Test Connection</em> below to verify.
+      </div>
     </div>
 
     <div class="provider-form" id="prov-openphone">
@@ -1089,23 +1090,14 @@ async function twilioSend(lead, message) {
 }
 
 async function zoomSend(lead, message) {
-  const acct   = document.getElementById('zoom-acct').value.trim();
-  const client = document.getElementById('zoom-client').value.trim();
-  const secret = document.getElementById('zoom-secret').value.trim();
-  const from   = document.getElementById('zoom-from').value.trim();
-  if (!acct||!client||!secret||!from) return {ok:false,error:'Zoom credentials not set'};
-  // Get OAuth token
-  const tokenRes = await fetch('https://zoom.us/oauth/token?grant_type=account_credentials&account_id='+acct, {
-    method:'POST', headers:{Authorization:'Basic '+btoa(client+':'+secret)}
+  // Credentials live server-side (.env.local / Vercel env) — see /api/send-sms
+  const res = await fetch('/api/send-sms', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ to: lead.phone, message }),
   });
-  if (!tokenRes.ok) return {ok:false, error:'Zoom token error'};
-  const {access_token} = await tokenRes.json();
-  const smsRes = await fetch('https://api.zoom.us/v2/phone/sms/sessions', {
-    method:'POST',
-    headers:{'Authorization':'Bearer '+access_token,'Content-Type':'application/json'},
-    body: JSON.stringify({ message, to_number: lead.phone, from_number: from }),
-  });
-  return smsRes.ok ? {ok:true} : {ok:false, error:(await smsRes.json().catch(()=>({}))).message};
+  const data = await res.json().catch(()=>({}));
+  return data.ok ? {ok:true} : {ok:false, error: data.error || res.statusText};
 }
 
 async function openphoneSend(lead, message) {
@@ -1135,7 +1127,6 @@ function saveSettings() {
   const cfg = {
     provider: currentProv,
     twilio:  { sid: v('twilio-sid'), token: v('twilio-token'), from: v('twilio-from') },
-    zoom:    { acct: v('zoom-acct'), client: v('zoom-client'), secret: v('zoom-secret'), from: v('zoom-from') },
     op:      { key: v('op-key'), from: v('op-from') },
     sender:  { name: v('s-name'), company: v('s-company'), footer: v('s-footer'), autoFooter: document.getElementById('auto-footer').checked },
     behavior:{ skipOpted: document.getElementById('t-skip-opted').checked, skipNoPhone: document.getElementById('t-skip-nophone').checked, skipSent: document.getElementById('t-skip-sent').checked, consoleLog: document.getElementById('t-console').checked },
@@ -1151,13 +1142,25 @@ function loadSettings() {
     currentProv = cfg.provider || 'demo';
     document.querySelectorAll('.prov-tab').forEach(t => { if (t.textContent.toLowerCase().includes(currentProv)) t.click(); });
     if (cfg.twilio) { sv('twilio-sid',cfg.twilio.sid); sv('twilio-token',cfg.twilio.token); sv('twilio-from',cfg.twilio.from); }
-    if (cfg.zoom)   { sv('zoom-acct',cfg.zoom.acct); sv('zoom-client',cfg.zoom.client); sv('zoom-secret',cfg.zoom.secret); sv('zoom-from',cfg.zoom.from); }
     if (cfg.op)     { sv('op-key',cfg.op.key); sv('op-from',cfg.op.from); }
     if (cfg.sender) { sv('s-name',cfg.sender.name); sv('s-company',cfg.sender.company); sv('s-footer',cfg.sender.footer); document.getElementById('auto-footer').checked = cfg.sender.autoFooter; }
   } catch(e){}
 }
 
-function testProvider() {
+async function testProvider() {
+  if (currentProv === 'zoom') {
+    toast('🔌 Testing Zoom connection…');
+    try {
+      const res = await fetch('/api/send-sms');
+      const data = await res.json();
+      toast(data.ok
+        ? `✅ Zoom connected — sending as ${data.from}`
+        : `❌ Zoom: ${data.error}`);
+    } catch (e) {
+      toast('❌ Zoom test failed: ' + e.message);
+    }
+    return;
+  }
   toast(`🔌 Testing ${currentProv}… (check console for result)`);
   console.log('[Bluebird] Test connection — provider:', currentProv);
 }

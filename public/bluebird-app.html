@@ -327,6 +327,9 @@ select.field-input option{background:var(--navy-mid)}
     <button class="btn btn-brass btn-sm" onclick="goPage('send',document.querySelector('[data-page=send]'))" id="send-sel-btn" disabled>
       🚀 Send to Selected (<span id="sel-count">0</span>)
     </button>
+    <button class="btn btn-red btn-sm" onclick="deleteSelected()" id="del-sel-btn" disabled>
+      🗑 Delete (<span id="del-count">0</span>)
+    </button>
     <button class="btn btn-ghost btn-sm" onclick="exportCSV()">⬇ Export</button>
   </div>
   <div id="tag-filter-bar" style="display:none;background:var(--navy-mid);border-bottom:1px solid rgba(15,23,42,.06);padding:7px 18px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;overflow-x:auto;">
@@ -913,12 +916,28 @@ function clearSelection() {
   renderKanban();
 }
 
+async function deleteSelected() {
+  const sel = leads.filter(l => l.selected);
+  if (!sel.length) { toast('No leads selected.'); return; }
+  if (!confirm(`Delete ${sel.length} selected lead${sel.length !== 1 ? 's' : ''}? This removes them from the database and cannot be undone.`)) return;
+  const ids = sel.map(l => l.id);
+  const { error } = await sb.from('leads').delete().in('id', ids);
+  if (error) { toast('⚠️ Delete failed: ' + error.message); return; }
+  leads = leads.filter(l => !l.selected);
+  renderKanban();
+  updateNavBadges();
+  refreshTagFilterBar();
+  toast(`🗑 Deleted ${sel.length} lead${sel.length !== 1 ? 's' : ''}`);
+}
+
 function updateSelCount() {
   const n = leads.filter(l=>l.selected).length;
   document.getElementById('sel-count').textContent = n;
+  document.getElementById('del-count').textContent = n;
   document.getElementById('hdr-sel').textContent = n;
   document.getElementById('hdr-total').textContent = leads.length;
   document.getElementById('send-sel-btn').disabled = n === 0;
+  document.getElementById('del-sel-btn').disabled = n === 0;
   document.getElementById('nb-kanban').textContent = leads.length;
   const nb = document.getElementById('nb-send');
   if (n > 0) { nb.style.display=''; nb.textContent = n; }

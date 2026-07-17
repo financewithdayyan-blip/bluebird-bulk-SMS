@@ -9,6 +9,32 @@
 let cachedToken = null; // { access_token, expiresAt }
 let cachedUserId = null;
 
+// Verifies the caller's Supabase session token and (optionally) restricts
+// sending to the emails listed in ALLOWED_EMAILS (comma-separated).
+async function requireUser(req) {
+  const auth = req.headers.authorization || '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+  if (!token) return { error: 'Sign in required', status: 401 };
+
+  const res = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/auth/v1/user`, {
+    headers: {
+      apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  if (!res.ok) return { error: 'Invalid or expired session — sign in again', status: 401 };
+  const user = await res.json();
+
+  const allowed = (process.env.ALLOWED_EMAILS || '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  if (allowed.length && !allowed.includes((user.email || '').toLowerCase())) {
+    return { error: `Account ${user.email} is not authorized to send SMS`, status: 403 };
+  }
+  return { user };
+}
+
 async function getAccessToken() {
   if (cachedToken && Date.now() < cachedToken.expiresAt - 60_000) {
     return cachedToken.access_token;
@@ -59,6 +85,12 @@ export default async function handler(req, res) {
   );
   if (missing.length) {
     res.status(500).json({ ok: false, error: `Missing env vars: ${missing.join(', ')}` });
+    return;
+  }
+
+  const authCheck = await requireUser(req);
+  if (authCheck.error) {
+    res.status(authCheck.status).json({ ok: false, error: authCheck.error });
     return;
   }
 

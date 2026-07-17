@@ -241,9 +241,46 @@ select.field-input option{background:var(--navy-mid)}
 .toggle input:checked+.toggle-slider::after{transform:translateX(18px)}
 .save-row{display:flex;justify-content:flex-end;gap:10px;margin-top:4px}
 .key-field{font-family:'Cascadia Code','Courier New',monospace;font-size:12px;letter-spacing:.03em}
+
+/* ── AUTH ─────────────────────────────────────────────── */
+#auth-screen{position:fixed;inset:0;background:var(--navy);z-index:1000;display:flex;align-items:center;justify-content:center}
+.auth-card{background:var(--navy-mid);border:1px solid rgba(26,86,219,.15);border-radius:10px;padding:34px 36px;width:400px;max-width:92vw;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:16px}
+.auth-logo{display:flex;align-items:center;justify-content:center;gap:9px;font-size:16px;font-weight:800;color:var(--brass-light);letter-spacing:.05em;text-transform:uppercase;margin-bottom:4px}
+.auth-tabs{display:flex;gap:4px;background:var(--navy-card);border-radius:var(--r);padding:4px}
+.auth-tab{flex:1;padding:8px;border:none;border-radius:4px;background:transparent;color:var(--muted);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;transition:all .15s}
+.auth-tab.active{background:var(--brass);color:#fff}
+.auth-msg{font-size:12.5px;line-height:1.5;min-height:18px}
+.auth-msg.err{color:var(--red)}
+.auth-msg.ok{color:var(--green)}
 </style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 </head>
 <body>
+
+<!-- ── AUTH SCREEN ──────────────────────────────────────── -->
+<div id="auth-screen">
+  <div class="auth-card">
+    <div class="auth-logo">
+      <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+        <ellipse cx="14" cy="16" rx="7" ry="5" fill="#1a56db" opacity=".9"/>
+        <ellipse cx="18" cy="13" rx="4" ry="2.5" fill="#3b82f6" transform="rotate(-20 18 13)"/>
+        <path d="M21 12 Q26 10 28 8 Q25 11 22 13" fill="#3b82f6"/>
+        <circle cx="20" cy="12" r="1.5" fill="#ffffff"/>
+        <path d="M9 14 Q3 12 1 8 Q5 13 10 15" fill="#1e40af" opacity=".7"/>
+        <path d="M15 19 Q14 24 12 27" stroke="#3b82f6" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+      </svg>
+      Bluebird <span style="color:var(--muted);font-weight:400;margin:0 2px">/</span> Bulk SMS
+    </div>
+    <div class="auth-tabs">
+      <button class="auth-tab active" id="at-signin" onclick="setAuthMode('signin')">Sign In</button>
+      <button class="auth-tab" id="at-signup" onclick="setAuthMode('signup')">Sign Up</button>
+    </div>
+    <div class="field"><label>Email</label><input class="field-input" id="auth-email" type="email" placeholder="you@example.com" autocomplete="email"/></div>
+    <div class="field"><label>Password</label><input class="field-input" id="auth-pass" type="password" placeholder="••••••••" autocomplete="current-password"/></div>
+    <div class="auth-msg" id="auth-msg"></div>
+    <button class="btn btn-brass btn-full" id="auth-submit" onclick="submitAuth()">Sign In</button>
+  </div>
+</div>
 
 <!-- ── NAV ──────────────────────────────────────────────── -->
 <nav>
@@ -275,6 +312,8 @@ select.field-input option{background:var(--navy-mid)}
   <div class="nav-spacer"></div>
   <div class="nav-pill">Leads <strong id="hdr-total">0</strong></div>
   <div class="nav-pill">Selected <strong id="hdr-sel">0</strong></div>
+  <div class="nav-pill" id="nav-user" style="display:none" title="Signed in">👤 <strong id="nav-user-email" style="font-size:11px"></strong></div>
+  <button class="btn btn-ghost btn-sm" id="signout-btn" style="display:none;margin-left:8px" onclick="signOut()">Sign out</button>
 </nav>
 
 <!-- ══════════════════════════════════════════════════════
@@ -1086,7 +1125,7 @@ async function zoomSend(lead, message) {
   // Credentials live server-side (.env.local / Vercel env) — see /api/send-sms
   const res = await fetch('/api/send-sms', {
     method: 'POST',
-    headers: {'Content-Type':'application/json'},
+    headers: {'Content-Type':'application/json', 'Authorization':'Bearer ' + authToken()},
     body: JSON.stringify({ to: lead.phone, message }),
   });
   const data = await res.json().catch(()=>({}));
@@ -1144,7 +1183,7 @@ async function testProvider() {
   if (currentProv === 'zoom') {
     toast('🔌 Testing Zoom connection…');
     try {
-      const res = await fetch('/api/send-sms');
+      const res = await fetch('/api/send-sms', { headers: {'Authorization':'Bearer ' + authToken()} });
       const data = await res.json();
       toast(data.ok
         ? `✅ Zoom connected — sending as ${data.from}`
@@ -1267,10 +1306,88 @@ function setTagFilter(tag, el) {
 }
 
 /* ═══════════════════════════════════════════════════
+   AUTH (Supabase)
+═══════════════════════════════════════════════════ */
+let sb = null;          // supabase client
+let sbSession = null;   // current session
+let authMode = 'signin';
+
+async function initAuth() {
+  try {
+    const cfg = await (await fetch('/api/config')).json();
+    if (!cfg.url || !cfg.anonKey) throw new Error('Server is missing Supabase config');
+    sb = supabase.createClient(cfg.url, cfg.anonKey);
+    const { data: { session } } = await sb.auth.getSession();
+    applySession(session);
+    sb.auth.onAuthStateChange((_event, session) => applySession(session));
+  } catch (e) {
+    authMsg('err', 'Could not initialize sign-in: ' + e.message);
+  }
+}
+
+function applySession(session) {
+  sbSession = session;
+  document.getElementById('auth-screen').style.display = session ? 'none' : 'flex';
+  document.getElementById('nav-user').style.display = session ? '' : 'none';
+  document.getElementById('signout-btn').style.display = session ? '' : 'none';
+  if (session) document.getElementById('nav-user-email').textContent = session.user.email;
+}
+
+function authToken() { return sbSession ? sbSession.access_token : ''; }
+
+function setAuthMode(mode) {
+  authMode = mode;
+  document.getElementById('at-signin').classList.toggle('active', mode === 'signin');
+  document.getElementById('at-signup').classList.toggle('active', mode === 'signup');
+  document.getElementById('auth-submit').textContent = mode === 'signin' ? 'Sign In' : 'Create Account';
+  document.getElementById('auth-pass').autocomplete = mode === 'signin' ? 'current-password' : 'new-password';
+  authMsg('', '');
+}
+
+function authMsg(cls, text) {
+  const el = document.getElementById('auth-msg');
+  el.className = 'auth-msg ' + cls;
+  el.textContent = text;
+}
+
+async function submitAuth() {
+  const email = document.getElementById('auth-email').value.trim();
+  const password = document.getElementById('auth-pass').value;
+  if (!email || !password) { authMsg('err', 'Enter email and password.'); return; }
+  if (password.length < 6) { authMsg('err', 'Password must be at least 6 characters.'); return; }
+  const btn = document.getElementById('auth-submit');
+  btn.disabled = true;
+  try {
+    if (authMode === 'signin') {
+      const { error } = await sb.auth.signInWithPassword({ email, password });
+      if (error) { authMsg('err', error.message); return; }
+      authMsg('ok', 'Signed in ✓');
+    } else {
+      const { data, error } = await sb.auth.signUp({ email, password });
+      if (error) { authMsg('err', error.message); return; }
+      if (data.session) authMsg('ok', 'Account created — signed in ✓');
+      else authMsg('ok', 'Account created. Check your email for a confirmation link, then sign in.');
+    }
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function signOut() {
+  await sb.auth.signOut();
+  toast('Signed out');
+}
+
+// Enter submits the auth form
+['auth-email','auth-pass'].forEach(id =>
+  document.getElementById(id).addEventListener('keydown', e => { if (e.key === 'Enter') submitAuth(); }));
+
+/* ═══════════════════════════════════════════════════
    INIT
 ═══════════════════════════════════════════════════ */
 loadSettings();
 renderKanban();
+initAuth();
 </script>
 </body>
 </html>

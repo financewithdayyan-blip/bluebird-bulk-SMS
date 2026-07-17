@@ -692,8 +692,9 @@ function formatPhone(raw) {
   return raw.trim();
 }
 
-function importLeads() {
+async function importLeads() {
   if (!csvRaw.length) return;
+  if (!sbSession) { toast('⚠️ Sign in first.'); return; }
   const ci = {
     name:    document.getElementById('col-name').value,
     phone:   document.getElementById('col-phone').value,
@@ -701,23 +702,28 @@ function importLeads() {
     stage:   document.getElementById('col-stage').value,
     opted:   document.getElementById('col-opted').value,
   };
-  const newLeads = csvRaw.slice(1).filter(r => r.some(c => c)).map((r, i) => ({
-    id: Date.now() + i,
+  const rows = csvRaw.slice(1).filter(r => r.some(c => c)).map(r => ({
     name:      ci.name    !== '' ? (r[+ci.name]    || '') : '',
     phone:     ci.phone   !== '' ? formatPhone(r[+ci.phone] || '') : '',
     address:   ci.address !== '' ? (r[+ci.address] || '') : '',
     stage:     ci.stage   !== '' ? (r[+ci.stage]   || 'Cold Call') : 'Cold Call',
     opted_out: ci.opted   !== '' ? ['yes','true','1','y'].includes((r[+ci.opted]||'').toLowerCase()) : false,
     status: 'pending',
-    selected: false,
     tags: [...pendingTags],
   }));
-  leads = newLeads;
+  document.getElementById('import-status').textContent = 'Saving…';
+  const { data, error } = await sb.from('leads').insert(rows).select();
+  if (error) {
+    document.getElementById('import-status').textContent = '';
+    toast('⚠️ Import failed: ' + error.message);
+    return;
+  }
+  leads = leads.concat(data.map(r => ({ ...r, selected: false, tags: r.tags || [] })));
   updateNavBadges();
   renderKanban();
   refreshTagFilterBar();
-  document.getElementById('import-status').textContent = `✅ ${leads.length} leads imported`;
-  toast(`✅ ${leads.length} leads imported — go to Kanban`);
+  document.getElementById('import-status').textContent = `✅ ${data.length} leads imported`;
+  toast(`✅ ${data.length} leads imported — go to Kanban`);
 }
 
 /* ═══════════════════════════════════════════════════
@@ -861,8 +867,10 @@ function onDrop(e) {
   const prevStage = lead.stage;
   lead.stage = targetCol.label;
   renderKanban();
-  if (prevStage !== lead.stage)
+  if (prevStage !== lead.stage) {
+    dbUpdate(lead.id, { stage: lead.stage });
     toast(`↔ ${lead.name||lead.phone} → ${targetCol.label}`);
+  }
   dragLeadId = null;
 }
 
@@ -989,11 +997,13 @@ function renderSendPage() {
   `).join('');
 }
 
-function resetStatuses() {
+async function resetStatuses() {
   leads.forEach(l => { if (l.status !== 'pending') l.status = 'pending'; });
   renderSendPage();
   renderKanban();
-  toast('Statuses reset to Pending');
+  const { error } = await sb.from('leads').update({ status: 'pending' }).neq('status', 'pending');
+  if (error) toast('⚠️ Save failed: ' + error.message);
+  else toast('Statuses reset to Pending');
 }
 
 async function startSend() {
@@ -1039,11 +1049,13 @@ async function startSend() {
     // Skip checks
     if (skipOpted && lead.opted_out) {
       lead.status = 'skipped'; skipped++;
+      dbUpdate(lead.id, { status: 'skipped' });
       addLog('log-skip', `⊘  Skipped (opted out): ${lead.name || lead.phone}`);
       renderSendPage(); continue;
     }
     if (skipNoPhone && !lead.phone) {
       lead.status = 'skipped'; skipped++;
+      dbUpdate(lead.id, { status: 'skipped' });
       addLog('log-skip', `⊘  Skipped (no phone): ${lead.name}`);
       renderSendPage(); continue;
     }
@@ -1064,9 +1076,11 @@ async function startSend() {
       lead.stage = 'Contacted';
       sent++;
       addLog('log-sent', `✓  Sent → ${lead.phone} · moved to Contacted`);
+      dbUpdate(lead.id, { status: 'sent', stage: 'Contacted' });
     } else {
       lead.status = 'failed'; failed++;
       addLog('log-fail', `✗  Failed → ${lead.phone}: ${result.error||''}`);
+      dbUpdate(lead.id, { status: 'failed' });
     }
 
     renderSendPage();
@@ -1215,12 +1229,15 @@ function exportCSV() {
   a.click();
 }
 
-function clearAll() {
+async function clearAll() {
   if (!leads.length) { toast('Nothing to clear.'); return; }
-  if (!confirm(`Clear all ${leads.length} leads? This cannot be undone.`)) return;
+  if (!confirm(`Clear all ${leads.length} leads? This deletes them from the database and cannot be undone.`)) return;
+  const { error } = await sb.from('leads').delete().gte('id', 0);
+  if (error) { toast('⚠️ Delete failed: ' + error.message); return; }
   leads = [];
   renderKanban();
   updateNavBadges();
+  refreshTagFilterBar();
   toast('All leads cleared.');
 }
 
@@ -1326,11 +1343,31 @@ async function initAuth() {
 }
 
 function applySession(session) {
+  const prevUserId = sbSession?.user?.id;
   sbSession = session;
   document.getElementById('auth-screen').style.display = session ? 'none' : 'flex';
   document.getElementById('nav-user').style.display = session ? '' : 'none';
   document.getElementById('signout-btn').style.display = session ? '' : 'none';
-  if (session) document.getElementById('nav-user-email').textContent = session.user.email;
+  if (session) {
+    document.getElementById('nav-user-email').textContent = session.user.email;
+    if (session.user.id !== prevUserId) loadLeads();
+  } else if (prevUserId) {
+    leads = [];
+    renderKanban(); updateNavBadges(); refreshTagFilterBar();
+  }
+}
+
+/* ── LEAD PERSISTENCE (Supabase) ── */
+async function loadLeads() {
+  const { data, error } = await sb.from('leads').select('*').order('created_at').order('id');
+  if (error) { toast('⚠️ Failed to load leads: ' + error.message); return; }
+  leads = data.map(r => ({ ...r, selected: false, tags: r.tags || [] }));
+  updateNavBadges(); renderKanban(); refreshTagFilterBar();
+}
+
+async function dbUpdate(id, fields) {
+  const { error } = await sb.from('leads').update(fields).eq('id', id);
+  if (error) toast('⚠️ Save failed: ' + error.message);
 }
 
 function authToken() { return sbSession ? sbSession.access_token : ''; }

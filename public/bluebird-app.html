@@ -731,13 +731,20 @@ async function importLeads() {
       tags: [...pendingTags],
     };
   });
-  document.getElementById('import-status').textContent = 'Saving…';
-  const { data, error } = await sb.from('leads').insert(rows).select();
-  if (error) {
-    document.getElementById('import-status').textContent = '';
-    toast('⚠️ Import failed: ' + error.message);
-    return;
+  // Insert in chunks so large CSVs (3000-4000+ rows) aren't limited or rejected
+  const chunk = 500;
+  const inserted = [];
+  for (let i = 0; i < rows.length; i += chunk) {
+    document.getElementById('import-status').textContent = `Saving… ${inserted.length}/${rows.length}`;
+    const { data, error } = await sb.from('leads').insert(rows.slice(i, i + chunk)).select();
+    if (error) {
+      document.getElementById('import-status').textContent = '';
+      toast(`⚠️ Import failed after ${inserted.length} rows: ` + error.message);
+      return;
+    }
+    inserted.push(...data);
   }
+  const data = inserted;
   leads = leads.concat(data.map(r => ({ ...r, selected: false, tags: r.tags || [] })));
   updateNavBadges();
   renderKanban();
@@ -1451,9 +1458,18 @@ function applySession(session) {
 
 /* ── LEAD PERSISTENCE (Supabase) ── */
 async function loadLeads() {
-  const { data, error } = await sb.from('leads').select('*').order('created_at').order('id');
-  if (error) { toast('⚠️ Failed to load leads: ' + error.message); return; }
-  leads = data.map(r => ({ ...r, selected: false, tags: r.tags || [] }));
+  // Supabase caps each request at 1000 rows — page through until done
+  const page = 1000;
+  let from = 0, all = [];
+  while (true) {
+    const { data, error } = await sb.from('leads').select('*')
+      .order('created_at').order('id').range(from, from + page - 1);
+    if (error) { toast('⚠️ Failed to load leads: ' + error.message); return; }
+    all = all.concat(data);
+    if (data.length < page) break;
+    from += page;
+  }
+  leads = all.map(r => ({ ...r, selected: false, tags: r.tags || [] }));
   updateNavBadges(); renderKanban(); refreshTagFilterBar();
 }
 

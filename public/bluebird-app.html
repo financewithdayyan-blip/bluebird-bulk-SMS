@@ -599,6 +599,20 @@ select.field-input option{background:var(--navy-mid)}
   </div>
 </div>
 
+<!-- ── LEAD NOTES MODAL ─────────────────────────────────── -->
+<div class="modal-bg" id="notes-modal">
+  <div class="modal" style="width:500px;max-height:88vh;display:flex;flex-direction:column;">
+    <h2>📝 <span id="notes-lead-name"></span></h2>
+    <div id="notes-lead-sub" style="font-size:11.5px;color:var(--muted);margin:-10px 0 14px;"></div>
+    <div id="notes-list" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:8px;margin-bottom:14px;max-height:320px;"></div>
+    <textarea class="template-area" id="note-input" style="min-height:70px;" placeholder="Write a note… e.g. Wants $250k, call back Tuesday after 2pm"></textarea>
+    <div style="display:flex;gap:10px;margin-top:12px;justify-content:flex-end;">
+      <button class="btn btn-ghost" onclick="closeNotes()">Close</button>
+      <button class="btn btn-brass" onclick="addNote()">Add Note</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── TOAST ──────────────────────────────────────────────── -->
 <div id="toast"></div>
 
@@ -871,10 +885,11 @@ function buildCard(l, col) {
     <div class="k-card-footer">
       <span class="k-badge s-badge ${statusCls}"><span class="sb-dot"></span>${statusLabel}</span>
       ${(l.tags||[]).map(t => `<span class="k-lead-tag">${esc(t)}</span>`).join('')}
+      ${col.id === 'interested' ? `<span class="k-lead-tag" style="border-color:rgba(8,145,178,.4);color:var(--teal);" title="Click card to open notes">📝 ${noteCounts[l.id] || 0}</span>` : ''}
     </div>
   `;
 
-  card.addEventListener('click', () => toggleCard(l.id));
+  card.addEventListener('click', () => col.id === 'interested' ? openNotes(l.id) : toggleCard(l.id));
   card.addEventListener('dragstart', onDragStart);
   card.addEventListener('dragend', onDragEnd);
   return card;
@@ -1485,7 +1500,84 @@ async function loadLeads() {
     from += page;
   }
   leads = all.map(r => ({ ...r, selected: false, tags: r.tags || [] }));
+  await loadNoteCounts();
   updateNavBadges(); renderKanban(); refreshTagFilterBar();
+}
+
+/* ── LEAD NOTES (Interested column) ── */
+let noteCounts = {};   // lead_id → number of notes
+let notesLeadId = null;
+
+async function loadNoteCounts() {
+  const page = 1000;
+  let from = 0;
+  const counts = {};
+  while (true) {
+    const { data, error } = await sb.from('lead_notes').select('lead_id').range(from, from + page - 1);
+    if (error) break;
+    data.forEach(n => counts[n.lead_id] = (counts[n.lead_id] || 0) + 1);
+    if (data.length < page) break;
+    from += page;
+  }
+  noteCounts = counts;
+}
+
+async function openNotes(id) {
+  const l = leads.find(x => x.id === id);
+  if (!l) return;
+  notesLeadId = id;
+  document.getElementById('notes-lead-name').textContent = l.name || l.phone || 'Lead';
+  document.getElementById('notes-lead-sub').textContent = [l.phone, l.address].filter(Boolean).join('  ·  ');
+  document.getElementById('notes-list').innerHTML = '<div style="color:var(--muted);font-size:12px;">Loading…</div>';
+  document.getElementById('notes-modal').classList.add('open');
+  const { data, error } = await sb.from('lead_notes').select('*')
+    .eq('lead_id', id).order('created_at', { ascending: false });
+  if (error) { toast('⚠️ Failed to load notes: ' + error.message); return; }
+  renderNotes(data);
+}
+
+function renderNotes(items) {
+  const el = document.getElementById('notes-list');
+  if (!items.length) {
+    el.innerHTML = '<div style="color:var(--muted);font-size:12px;opacity:.7;">No notes yet — write the first one below.</div>';
+    return;
+  }
+  el.innerHTML = items.map(n => `
+    <div style="background:var(--navy-card);border-radius:6px;padding:10px 12px;border-left:3px solid var(--teal);">
+      <div style="font-size:12.5px;line-height:1.55;white-space:pre-wrap;">${esc(n.body)}</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;">
+        <span style="font-size:10px;color:var(--muted);">${new Date(n.created_at).toLocaleString()}</span>
+        <span style="cursor:pointer;font-size:12px;color:var(--muted);padding:0 4px;" onclick="deleteNote(${n.id})" title="Delete note">✕</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function addNote() {
+  const body = document.getElementById('note-input').value.trim();
+  if (!body) { toast('Write something first.'); return; }
+  if (!notesLeadId) return;
+  const { error } = await sb.from('lead_notes').insert({ lead_id: notesLeadId, body });
+  if (error) { toast('⚠️ Failed to save note: ' + error.message); return; }
+  noteCounts[notesLeadId] = (noteCounts[notesLeadId] || 0) + 1;
+  document.getElementById('note-input').value = '';
+  toast('📝 Note added');
+  openNotes(notesLeadId);
+  renderKanban();
+}
+
+async function deleteNote(noteId) {
+  if (!confirm('Delete this note?')) return;
+  const { error } = await sb.from('lead_notes').delete().eq('id', noteId);
+  if (error) { toast('⚠️ Delete failed: ' + error.message); return; }
+  if (noteCounts[notesLeadId]) noteCounts[notesLeadId]--;
+  openNotes(notesLeadId);
+  renderKanban();
+}
+
+function closeNotes() {
+  document.getElementById('notes-modal').classList.remove('open');
+  notesLeadId = null;
 }
 
 async function dbUpdate(id, fields) {

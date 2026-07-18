@@ -113,6 +113,9 @@ select.field-input option{background:var(--navy-mid)}
 .k-card-name{font-size:13px;font-weight:600;margin-bottom:3px;display:flex;align-items:center;gap:6px}
 .k-card-phone{font-size:11px;font-family:'Cascadia Code','Courier New',monospace;color:var(--muted);margin-bottom:4px}
 .k-card-addr{font-size:10.5px;color:var(--muted);line-height:1.4}
+.copy-btn{background:none;border:none;cursor:pointer;color:var(--muted);font-size:11px;line-height:1;padding:1px 4px;border-radius:3px;opacity:0;transition:opacity .12s,color .12s,background .12s;vertical-align:middle}
+.k-card:hover .copy-btn{opacity:.75}
+.copy-btn:hover{opacity:1!important;color:var(--brass);background:rgba(26,86,219,.12)}
 .k-card-footer{display:flex;align-items:center;gap:6px;margin-top:7px}
 .k-badge{font-size:9px;font-weight:700;text-transform:uppercase;padding:2px 7px;border-radius:10px;letter-spacing:.05em}
 .k-card-check{position:absolute;top:8px;right:8px;opacity:0;transition:opacity .12s}
@@ -863,8 +866,8 @@ function buildCard(l, col) {
       ${esc(l.name)||'<span style="color:var(--muted)">No name</span>'}
       ${l.opted_out ? '<span title="Opted out" style="font-size:11px;">🚫</span>' : ''}
     </div>
-    <div class="k-card-phone">${esc(l.phone)||'—'}</div>
-    <div class="k-card-addr">${esc(l.address)}</div>
+    <div class="k-card-phone">${esc(l.phone)||'—'}${l.phone ? ` <button class="copy-btn" title="Copy number" onclick="event.stopPropagation();copyLead(${l.id},'phone')">⧉</button>` : ''}</div>
+    <div class="k-card-addr">${esc(l.address)}${l.address ? ` <button class="copy-btn" title="Copy address" onclick="event.stopPropagation();copyLead(${l.id},'address')">⧉</button>` : ''}</div>
     <div class="k-card-footer">
       <span class="k-badge s-badge ${statusCls}"><span class="sb-dot"></span>${statusLabel}</span>
       ${(l.tags||[]).map(t => `<span class="k-lead-tag">${esc(t)}</span>`).join('')}
@@ -924,6 +927,18 @@ function onDrop(e) {
 function toggleCard(id) {
   const l = leads.find(x => x.id === id);
   if (l) { l.selected = !l.selected; renderKanban(); }
+}
+
+async function copyLead(id, field) {
+  const l = leads.find(x => x.id === id);
+  const value = l && l[field];
+  if (!value) { toast('Nothing to copy.'); return; }
+  try {
+    await navigator.clipboard.writeText(value);
+    toast(`⧉ Copied ${field === 'phone' ? 'number' : 'address'}: ${value.length > 40 ? value.slice(0, 40) + '…' : value}`);
+  } catch {
+    toast('⚠️ Copy failed — browser blocked clipboard access');
+  }
 }
 
 function selectAllVisible() {

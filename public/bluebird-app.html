@@ -552,16 +552,18 @@ select.field-input option{background:var(--navy-mid)}
       <input type="file" id="csv-file" accept=".csv"/>
       <div class="uz-icon">📂</div>
       <p><strong>Click or drag</strong> a .csv file here</p>
-      <p style="margin-top:5px;font-size:11.5px;">Expected columns: name, phone, address, stage, opted_out</p>
+      <p style="margin-top:5px;font-size:11.5px;">Expected columns: first name, last name, street, city, state, zip, phone</p>
     </div>
     <div id="map-section" style="display:none;margin-top:18px;">
       <div class="section-label">Map CSV Columns</div>
       <div class="map-grid">
-        <div class="map-field"><label>Name column</label><select class="field-input" id="col-name"></select></div>
+        <div class="map-field"><label>First name column</label><select class="field-input" id="col-first"></select></div>
+        <div class="map-field"><label>Last name column</label><select class="field-input" id="col-last"></select></div>
+        <div class="map-field"><label>Street column</label><select class="field-input" id="col-street"></select></div>
+        <div class="map-field"><label>City column</label><select class="field-input" id="col-city"></select></div>
+        <div class="map-field"><label>State column</label><select class="field-input" id="col-state"></select></div>
+        <div class="map-field"><label>Zip column</label><select class="field-input" id="col-zip"></select></div>
         <div class="map-field"><label>Phone column</label><select class="field-input" id="col-phone"></select></div>
-        <div class="map-field"><label>Address column</label><select class="field-input" id="col-address"></select></div>
-        <div class="map-field"><label>Stage column</label><select class="field-input" id="col-stage"></select></div>
-        <div class="map-field"><label>Opted-out column</label><select class="field-input" id="col-opted"></select></div>
       </div>
       <div style="margin-top:16px;">
         <div class="section-label">Tag this batch</div>
@@ -671,11 +673,13 @@ function parseCSV(text) {
 
 function populateColumnSelects(headers) {
   const selectors = [
-    {id:'col-name',    hint:['name','first','full']},
-    {id:'col-phone',   hint:['phone','mobile','cell','number']},
-    {id:'col-address', hint:['address','addr','property','street']},
-    {id:'col-stage',   hint:['stage','status','pipeline']},
-    {id:'col-opted',   hint:['opt','unsubscribe','stop']},
+    {id:'col-first',  hint:['first']},
+    {id:'col-last',   hint:['last']},
+    {id:'col-street', hint:['street','address','addr']},
+    {id:'col-city',   hint:['city']},
+    {id:'col-state',  hint:['state']},
+    {id:'col-zip',    hint:['zip','postal']},
+    {id:'col-phone',  hint:['phone','mobile','cell','number']},
   ];
   selectors.forEach(({id, hint}) => {
     const sel = document.getElementById(id);
@@ -706,22 +710,23 @@ function formatPhone(raw) {
 async function importLeads() {
   if (!csvRaw.length) return;
   if (!sbSession) { toast('⚠️ Sign in first.'); return; }
-  const ci = {
-    name:    document.getElementById('col-name').value,
-    phone:   document.getElementById('col-phone').value,
-    address: document.getElementById('col-address').value,
-    stage:   document.getElementById('col-stage').value,
-    opted:   document.getElementById('col-opted').value,
-  };
-  const rows = csvRaw.slice(1).filter(r => r.some(c => c)).map(r => ({
-    name:      ci.name    !== '' ? (r[+ci.name]    || '') : '',
-    phone:     ci.phone   !== '' ? formatPhone(r[+ci.phone] || '') : '',
-    address:   ci.address !== '' ? (r[+ci.address] || '') : '',
-    stage:     ci.stage   !== '' ? (r[+ci.stage]   || 'Cold Call') : 'Cold Call',
-    opted_out: ci.opted   !== '' ? ['yes','true','1','y'].includes((r[+ci.opted]||'').toLowerCase()) : false,
-    status: 'pending',
-    tags: [...pendingTags],
-  }));
+  const ci = {};
+  for (const k of ['first','last','street','city','state','zip','phone']) {
+    ci[k] = document.getElementById('col-' + k).value;
+  }
+  const cell = (r, k) => ci[k] !== '' ? (r[+ci[k]] || '').trim() : '';
+  const rows = csvRaw.slice(1).filter(r => r.some(c => c)).map(r => {
+    const stateZip = [cell(r,'state'), cell(r,'zip')].filter(Boolean).join(' ');
+    return {
+      name:    [cell(r,'first'), cell(r,'last')].filter(Boolean).join(' '),
+      phone:   ci.phone !== '' ? formatPhone(r[+ci.phone] || '') : '',
+      address: [cell(r,'street'), cell(r,'city'), stateZip].filter(Boolean).join(', '),
+      stage: 'Cold Call',
+      opted_out: false,
+      status: 'pending',
+      tags: [...pendingTags],
+    };
+  });
   document.getElementById('import-status').textContent = 'Saving…';
   const { data, error } = await sb.from('leads').insert(rows).select();
   if (error) {

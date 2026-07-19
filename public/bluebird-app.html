@@ -113,6 +113,7 @@ select.field-input option{background:var(--navy-mid)}
 .k-card-name{font-size:13px;font-weight:600;margin-bottom:3px;display:flex;align-items:center;gap:6px}
 .k-card-phone{font-size:11px;font-family:'Cascadia Code','Courier New',monospace;color:var(--muted);margin-bottom:4px}
 .k-card-addr{font-size:10.5px;color:var(--muted);line-height:1.4}
+.k-card-note{font-size:10.5px;color:var(--teal);line-height:1.45;margin-top:5px;font-style:italic;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .copy-btn{background:none;border:none;cursor:pointer;color:var(--muted);font-size:11px;line-height:1;padding:1px 4px;border-radius:3px;opacity:0;transition:opacity .12s,color .12s,background .12s;vertical-align:middle}
 .k-card:hover .copy-btn{opacity:.75}
 .copy-btn:hover{opacity:1!important;color:var(--brass);background:rgba(26,86,219,.12)}
@@ -558,7 +559,7 @@ select.field-input option{background:var(--navy-mid)}
       <input type="file" id="csv-file" accept=".csv"/>
       <div class="uz-icon">📂</div>
       <p><strong>Click or drag</strong> a .csv file here</p>
-      <p style="margin-top:5px;font-size:11.5px;">Expected columns: first name, last name, street, city, state, zip, phone</p>
+      <p style="margin-top:5px;font-size:11.5px;">Expected columns: first name, last name, street, city, state, zip, phone, notes</p>
     </div>
     <div id="map-section" style="display:none;margin-top:18px;">
       <div class="section-label">Map CSV Columns</div>
@@ -570,6 +571,7 @@ select.field-input option{background:var(--navy-mid)}
         <div class="map-field"><label>State column</label><select class="field-input" id="col-state"></select></div>
         <div class="map-field"><label>Zip column</label><select class="field-input" id="col-zip"></select></div>
         <div class="map-field"><label>Phone column</label><select class="field-input" id="col-phone"></select></div>
+        <div class="map-field"><label>Notes column</label><select class="field-input" id="col-notes"></select></div>
       </div>
       <div style="margin-top:16px;">
         <div class="section-label">Tag this batch</div>
@@ -604,7 +606,15 @@ select.field-input option{background:var(--navy-mid)}
   <div class="modal" style="width:500px;max-height:88vh;display:flex;flex-direction:column;">
     <h2>📝 <span id="notes-lead-name"></span></h2>
     <div id="notes-lead-sub" style="font-size:11.5px;color:var(--muted);margin:-10px 0 14px;"></div>
-    <div id="notes-list" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:8px;margin-bottom:14px;max-height:320px;"></div>
+    <div style="margin-bottom:14px;">
+      <div class="section-label" style="margin-bottom:6px;">Tags</div>
+      <div class="tag-input-wrap" style="min-height:36px;padding:5px 8px;">
+        <div class="tag-pills" id="notes-tag-pills"></div>
+        <input class="tag-text-input" id="notes-tag-input" placeholder="Add tag + Enter (e.g. Cash Buyer)" />
+      </div>
+    </div>
+    <div class="section-label" style="margin-bottom:6px;">Notes</div>
+    <div id="notes-list" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:8px;margin-bottom:14px;max-height:280px;"></div>
     <textarea class="template-area" id="note-input" style="min-height:70px;" placeholder="Write a note… e.g. Wants $250k, call back Tuesday after 2pm"></textarea>
     <div style="display:flex;gap:10px;margin-top:12px;justify-content:flex-end;">
       <button class="btn btn-ghost" onclick="closeNotes()">Close</button>
@@ -702,6 +712,7 @@ function populateColumnSelects(headers) {
     {id:'col-state',  hint:['state']},
     {id:'col-zip',    hint:['zip','postal']},
     {id:'col-phone',  hint:['phone','mobile','cell','number']},
+    {id:'col-notes',  hint:['note','comment','remark']},
   ];
   selectors.forEach(({id, hint}) => {
     const sel = document.getElementById(id);
@@ -733,11 +744,13 @@ async function importLeads() {
   if (!csvRaw.length) return;
   if (!sbSession) { toast('⚠️ Sign in first.'); return; }
   const ci = {};
-  for (const k of ['first','last','street','city','state','zip','phone']) {
+  for (const k of ['first','last','street','city','state','zip','phone','notes']) {
     ci[k] = document.getElementById('col-' + k).value;
   }
   const cell = (r, k) => ci[k] !== '' ? (r[+ci[k]] || '').trim() : '';
-  const rows = csvRaw.slice(1).filter(r => r.some(c => c)).map(r => {
+  const csvRows = csvRaw.slice(1).filter(r => r.some(c => c));
+  const noteTexts = csvRows.map(r => cell(r, 'notes'));
+  const rows = csvRows.map(r => {
     const stateZip = [cell(r,'state'), cell(r,'zip')].filter(Boolean).join(' ');
     return {
       name:    [cell(r,'first'), cell(r,'last')].filter(Boolean).join(' '),
@@ -752,6 +765,7 @@ async function importLeads() {
   // Insert in chunks so large CSVs (3000-4000+ rows) aren't limited or rejected
   const chunk = 500;
   const inserted = [];
+  const noteRows = [];
   for (let i = 0; i < rows.length; i += chunk) {
     document.getElementById('import-status').textContent = `Saving… ${inserted.length}/${rows.length}`;
     const { data, error } = await sb.from('leads').insert(rows.slice(i, i + chunk)).select();
@@ -760,8 +774,21 @@ async function importLeads() {
       toast(`⚠️ Import failed after ${inserted.length} rows: ` + error.message);
       return;
     }
+    data.forEach((row, j) => {
+      const note = noteTexts[i + j];
+      if (note) noteRows.push({ lead_id: row.id, body: note });
+    });
     inserted.push(...data);
   }
+  // Imported notes become each lead's first note
+  for (let i = 0; i < noteRows.length; i += chunk) {
+    const { error } = await sb.from('lead_notes').insert(noteRows.slice(i, i + chunk));
+    if (error) { toast('⚠️ Lead rows saved, but notes failed: ' + error.message); break; }
+  }
+  noteRows.forEach(n => {
+    noteCounts[n.lead_id] = (noteCounts[n.lead_id] || 0) + 1;
+    latestNotes[n.lead_id] = n.body;
+  });
   const data = inserted;
   leads = leads.concat(data.map(r => ({ ...r, selected: false, tags: r.tags || [] })));
   updateNavBadges();
@@ -883,14 +910,15 @@ function buildCard(l, col) {
     </div>
     <div class="k-card-phone">${esc(l.phone)||'—'}${l.phone ? ` <button class="copy-btn" title="Copy number" onclick="event.stopPropagation();copyLead(${l.id},'phone')">⧉</button>` : ''}</div>
     <div class="k-card-addr">${esc(l.address)}${l.address ? ` <button class="copy-btn" title="Copy address" onclick="event.stopPropagation();copyLead(${l.id},'address')">⧉</button>` : ''}</div>
+    ${latestNotes[l.id] ? `<div class="k-card-note" title="${esc(latestNotes[l.id])}">📝 ${esc(latestNotes[l.id])}</div>` : ''}
     <div class="k-card-footer">
       <span class="k-badge s-badge ${statusCls}"><span class="sb-dot"></span>${statusLabel}</span>
       ${(l.tags||[]).map(t => `<span class="k-lead-tag">${esc(t)}</span>`).join('')}
-      ${col.id === 'interested' ? `<span class="k-lead-tag" style="border-color:rgba(8,145,178,.4);color:var(--teal);" title="Click card to open notes">📝 ${noteCounts[l.id] || 0}</span>` : ''}
+      ${!NOTES_DISABLED_COLS.includes(col.id) ? `<span class="k-lead-tag" style="border-color:rgba(8,145,178,.4);color:var(--teal);" title="Click card to open notes">📝 ${noteCounts[l.id] || 0}</span>` : ''}
     </div>
   `;
 
-  card.addEventListener('click', () => col.id === 'interested' ? openNotes(l.id) : toggleCard(l.id));
+  card.addEventListener('click', () => !NOTES_DISABLED_COLS.includes(col.id) ? openNotes(l.id) : toggleCard(l.id));
   card.addEventListener('dragstart', onDragStart);
   card.addEventListener('dragend', onDragEnd);
   return card;
@@ -1430,6 +1458,21 @@ document.addEventListener('DOMContentLoaded', () => {});
   document.getElementById('tag-input-wrap')?.addEventListener('click', () => inp.focus());
 })();
 
+// Wire the tag input inside the notes modal
+(function wireNotesTagInput() {
+  const inp = document.getElementById('notes-tag-input');
+  if (!inp) return;
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      if (inp.value.trim()) { addLeadTag(inp.value); inp.value = ''; }
+    }
+  });
+  inp.addEventListener('blur', () => {
+    if (inp.value.trim()) { addLeadTag(inp.value); inp.value = ''; }
+  });
+})();
+
 /* ═══════════════════════════════════════════════════
    TAG FILTER BAR (Kanban)
 ═══════════════════════════════════════════════════ */
@@ -1505,22 +1548,30 @@ async function loadLeads() {
   updateNavBadges(); renderKanban(); refreshTagFilterBar();
 }
 
-/* ── LEAD NOTES (Interested column) ── */
+/* ── LEAD NOTES (all columns except Cold Call & Contacted) ── */
 let noteCounts = {};   // lead_id → number of notes
+let latestNotes = {};  // lead_id → most recent note body (shown on the card)
 let notesLeadId = null;
+const NOTES_DISABLED_COLS = ['cold_call', 'contacted'];
 
 async function loadNoteCounts() {
   const page = 1000;
   let from = 0;
-  const counts = {};
+  const counts = {}, latest = {};
   while (true) {
-    const { data, error } = await sb.from('lead_notes').select('lead_id').range(from, from + page - 1);
+    const { data, error } = await sb.from('lead_notes').select('lead_id, body')
+      .order('created_at', { ascending: false }).order('id', { ascending: false })
+      .range(from, from + page - 1);
     if (error) break;
-    data.forEach(n => counts[n.lead_id] = (counts[n.lead_id] || 0) + 1);
+    data.forEach(n => {
+      counts[n.lead_id] = (counts[n.lead_id] || 0) + 1;
+      if (latest[n.lead_id] === undefined) latest[n.lead_id] = n.body;
+    });
     if (data.length < page) break;
     from += page;
   }
   noteCounts = counts;
+  latestNotes = latest;
 }
 
 async function openNotes(id) {
@@ -1531,10 +1582,43 @@ async function openNotes(id) {
   document.getElementById('notes-lead-sub').textContent = [l.phone, l.address].filter(Boolean).join('  ·  ');
   document.getElementById('notes-list').innerHTML = '<div style="color:var(--muted);font-size:12px;">Loading…</div>';
   document.getElementById('notes-modal').classList.add('open');
+  renderNotesTags();
   const { data, error } = await sb.from('lead_notes').select('*')
-    .eq('lead_id', id).order('created_at', { ascending: false });
+    .eq('lead_id', id).order('created_at', { ascending: false }).order('id', { ascending: false });
   if (error) { toast('⚠️ Failed to load notes: ' + error.message); return; }
+  noteCounts[id] = data.length;
+  if (data.length) latestNotes[id] = data[0].body; else delete latestNotes[id];
   renderNotes(data);
+}
+
+/* Tag editing inside the notes modal */
+function renderNotesTags() {
+  const l = leads.find(x => x.id === notesLeadId);
+  if (!l) return;
+  document.getElementById('notes-tag-pills').innerHTML = (l.tags || []).map((t, i) => `
+    <span class="tag-pill">${esc(t)}<span class="tag-x" onclick="removeLeadTag(${i})">×</span></span>
+  `).join('');
+}
+
+async function addLeadTag(raw) {
+  const l = leads.find(x => x.id === notesLeadId);
+  if (!l) return;
+  const tags = raw.split(/[,;]+/).map(t => t.trim()).filter(Boolean);
+  const added = tags.filter(t => !(l.tags || []).includes(t));
+  if (!added.length) return;
+  l.tags = [...(l.tags || []), ...added];
+  await dbUpdate(l.id, { tags: l.tags });
+  renderNotesTags(); renderKanban(); refreshTagFilterBar();
+  toast(`🏷 Tagged: ${added.join(', ')}`);
+}
+
+async function removeLeadTag(i) {
+  const l = leads.find(x => x.id === notesLeadId);
+  if (!l || !l.tags || i >= l.tags.length) return;
+  const removed = l.tags.splice(i, 1)[0];
+  await dbUpdate(l.id, { tags: l.tags });
+  renderNotesTags(); renderKanban(); refreshTagFilterBar();
+  toast(`🏷 Removed: ${removed}`);
 }
 
 function renderNotes(items) {
@@ -1560,10 +1644,9 @@ async function addNote() {
   if (!notesLeadId) return;
   const { error } = await sb.from('lead_notes').insert({ lead_id: notesLeadId, body });
   if (error) { toast('⚠️ Failed to save note: ' + error.message); return; }
-  noteCounts[notesLeadId] = (noteCounts[notesLeadId] || 0) + 1;
   document.getElementById('note-input').value = '';
   toast('📝 Note added');
-  openNotes(notesLeadId);
+  await openNotes(notesLeadId);
   renderKanban();
 }
 
@@ -1571,8 +1654,7 @@ async function deleteNote(noteId) {
   if (!confirm('Delete this note?')) return;
   const { error } = await sb.from('lead_notes').delete().eq('id', noteId);
   if (error) { toast('⚠️ Delete failed: ' + error.message); return; }
-  if (noteCounts[notesLeadId]) noteCounts[notesLeadId]--;
-  openNotes(notesLeadId);
+  await openNotes(notesLeadId);
   renderKanban();
 }
 

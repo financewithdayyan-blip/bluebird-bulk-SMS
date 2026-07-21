@@ -727,6 +727,9 @@ function populateColumnSelects(headers) {
 }
 
 function formatPhone(raw) {
+  // Spreadsheet exports often store phone as a number, adding a trailing
+  // ".0" (e.g. "2676849031.0") — strip any trailing decimal before parsing
+  raw = raw.trim().replace(/\.0+$/, '');
   const digits = raw.replace(/\D/g, '');
   if (!digits) return raw;
   // Already has country code

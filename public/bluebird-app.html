@@ -414,7 +414,7 @@ select.field-input option{background:var(--navy-mid)}
   <div class="send-panel">
     <h3>🚀 Send Controls</h3>
     <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:16px;">
-      <div style="font-size:13px;color:var(--muted);">Delay between sends: <strong style="color:var(--white)">0.75s</strong> (fixed)</div>
+      <div style="font-size:13px;color:var(--muted);">Delay between sends: <strong style="color:var(--white)">0.6s</strong> (fixed, minimum — actual pace also depends on Zoom's response time)</div>
       <div style="font-size:13px;color:var(--muted);">Sending window: <strong style="color:var(--white)">7:00 PM – 6:00 AM</strong> Pakistan time</div>
       <button class="btn btn-green" id="send-btn" onclick="startSend()" disabled>🚀 Start Sending</button>
       <button class="btn btn-red" id="cancel-btn" onclick="cancelSend()" style="display:none;">⛔ Cancel</button>
@@ -1180,7 +1180,7 @@ async function startSend() {
     logEl.scrollTop = logEl.scrollHeight;
   }
 
-  const delay = 750; // fixed 0.75s between sends
+  const delay = 600; // fixed 0.6s minimum spacing between send starts
   const skipOpted  = document.getElementById('t-skip-opted').checked;
   const skipNoPhone= document.getElementById('t-skip-nophone').checked;
   const skipSent   = document.getElementById('t-skip-sent').checked;
@@ -1227,7 +1227,9 @@ async function startSend() {
 
     currentSendingId = lead.id;
     renderSendPage();
+    const sendStarted = Date.now();
     const result = await sendSMS(lead, msg);
+    const elapsed = Date.now() - sendStarted;
 
     if (result.ok) {
       lead.status = 'sent';
@@ -1242,7 +1244,8 @@ async function startSend() {
     }
 
     renderSendPage();
-    if (i < queue.length - 1 && !abortSend) await sleep(delay);
+    const remaining = delay - elapsed;
+    if (i < queue.length - 1 && !abortSend && remaining > 0) await sleep(remaining);
   }
 
   currentSendingId = null;

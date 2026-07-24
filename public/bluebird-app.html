@@ -492,6 +492,16 @@ select.field-input option{background:var(--navy-mid)}
     </div>
   </div>
 
+  <!-- Quick-Add Tags -->
+  <div class="settings-card">
+    <h3>🏷 Quick-Add Tags</h3>
+    <p class="field-desc" style="margin-bottom:12px;">These appear as one-click buttons when tagging a CSV import batch.</p>
+    <div class="tag-input-wrap" id="settings-tag-input-wrap" style="margin-bottom:12px;">
+      <input class="tag-text-input" id="settings-tag-input" placeholder="Type a tag + Enter (e.g. Cash Buyer)" />
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;" id="settings-tag-list"></div>
+  </div>
+
   <!-- Sender Info -->
   <div class="settings-card">
     <h3>👤 Sender Info</h3>
@@ -580,15 +590,9 @@ select.field-input option{background:var(--navy-mid)}
           <div class="tag-pills" id="tag-pills"></div>
           <input class="tag-text-input" id="tag-text" placeholder="e.g. NC Foreclosure, July Batch, Priority…" />
         </div>
-        <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;" id="tag-presets">
-          <span style="font-size:10.5px;color:var(--muted);align-self:center;">Quick add:</span>
-          <button class="preset-tag-btn" onclick="addPresetTag('Pre-Foreclosure')">Pre-Foreclosure</button>
-          <button class="preset-tag-btn" onclick="addPresetTag('Probate')">Probate</button>
-          <button class="preset-tag-btn" onclick="addPresetTag('Tax Delinquent')">Tax Delinquent</button>
-          <button class="preset-tag-btn" onclick="addPresetTag('Lis Pendens')">Lis Pendens</button>
-          <button class="preset-tag-btn" onclick="addPresetTag('Code Violation')">Code Violation</button>
-          <button class="preset-tag-btn" onclick="addPresetTag('Eviction')">Eviction</button>
-          <button class="preset-tag-btn" onclick="addPresetTag('Priority')">Priority</button>
+        <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;" id="tag-presets">
+          <span style="font-size:10.5px;color:var(--muted);">Quick add:</span>
+          <span style="font-size:10.5px;color:var(--muted);" id="tag-presets-empty">Manage these in Settings →</span>
         </div>
       </div>
     </div>
@@ -1439,6 +1443,86 @@ function addPresetTag(t) {
   if (!pendingTags.includes(t)) { pendingTags.push(t); renderPendingTags(); }
 }
 
+/* ═══════════════════════════════════════════════════
+   QUICK-ADD PRESET TAGS (Supabase, editable in Settings)
+═══════════════════════════════════════════════════ */
+let presetTags = [];
+const DEFAULT_PRESET_TAGS = ['Pre-Foreclosure','Probate','Tax Delinquent','Lis Pendens','Code Violation','Eviction','Priority','Cash Buyer'];
+
+async function loadPresetTags() {
+  let { data, error } = await sb.from('preset_tags').select('tag').order('tag');
+  if (error) { toast('⚠️ Failed to load tags: ' + error.message); return; }
+  if (data.length === 0) {
+    const { data: seeded, error: seedErr } = await sb.from('preset_tags')
+      .insert(DEFAULT_PRESET_TAGS.map(tag => ({ tag }))).select('tag');
+    if (!seedErr) data = seeded;
+  }
+  presetTags = data.map(r => r.tag).sort((a,b) => a.localeCompare(b));
+  renderTagPresetButtons();
+  renderSettingsTagList();
+}
+
+function renderTagPresetButtons() {
+  const empty = document.getElementById('tag-presets-empty');
+  const existing = document.querySelectorAll('#tag-presets .preset-tag-btn');
+  existing.forEach(b => b.remove());
+  if (empty) empty.style.display = presetTags.length ? 'none' : '';
+  presetTags.forEach(t => {
+    const btn = document.createElement('button');
+    btn.className = 'preset-tag-btn';
+    btn.textContent = t;
+    btn.onclick = () => addPresetTag(t);
+    document.getElementById('tag-presets').appendChild(btn);
+  });
+}
+
+function renderSettingsTagList() {
+  const el = document.getElementById('settings-tag-list');
+  if (!el) return;
+  if (!presetTags.length) {
+    el.innerHTML = '<span style="font-size:12px;color:var(--muted);">No tags yet — add one above.</span>';
+    return;
+  }
+  el.innerHTML = presetTags.map(t => `
+    <span class="tag-pill">${esc(t)}<span class="tag-x" onclick="removePresetTagSetting('${esc(t).replace(/'/g,"\\'")}')">×</span></span>
+  `).join('');
+}
+
+async function addPresetTagSetting(raw) {
+  const tags = raw.split(/[,;]+/).map(t => t.trim()).filter(Boolean);
+  const added = tags.filter(t => !presetTags.includes(t));
+  if (!added.length) return;
+  const { error } = await sb.from('preset_tags').insert(added.map(tag => ({ tag })));
+  if (error) { toast('⚠️ Failed to add tag: ' + error.message); return; }
+  presetTags = [...presetTags, ...added].sort((a,b) => a.localeCompare(b));
+  renderTagPresetButtons();
+  renderSettingsTagList();
+  toast(`🏷 Added: ${added.join(', ')}`);
+}
+
+async function removePresetTagSetting(tag) {
+  const { error } = await sb.from('preset_tags').delete().eq('tag', tag);
+  if (error) { toast('⚠️ Failed to remove tag: ' + error.message); return; }
+  presetTags = presetTags.filter(t => t !== tag);
+  renderTagPresetButtons();
+  renderSettingsTagList();
+  toast(`🏷 Removed: ${tag}`);
+}
+
+(function wireSettingsTagInput() {
+  const inp = document.getElementById('settings-tag-input');
+  if (!inp) return;
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      if (inp.value.trim()) { addPresetTagSetting(inp.value); inp.value = ''; }
+    }
+  });
+  inp.addEventListener('blur', () => {
+    if (inp.value.trim()) { addPresetTagSetting(inp.value); inp.value = ''; }
+  });
+})();
+
 // Wire tag text input
 document.addEventListener('DOMContentLoaded', () => {});
 (function wireTagInput() {
@@ -1524,7 +1608,7 @@ function applySession(session) {
   document.getElementById('signout-btn').style.display = session ? '' : 'none';
   if (session) {
     document.getElementById('nav-user-email').textContent = session.user.email;
-    if (session.user.id !== prevUserId) { loadLeads(); loadTemplates(); }
+    if (session.user.id !== prevUserId) { loadLeads(); loadTemplates(); loadPresetTags(); }
   } else if (prevUserId) {
     leads = [];
     renderKanban(); updateNavBadges(); refreshTagFilterBar();

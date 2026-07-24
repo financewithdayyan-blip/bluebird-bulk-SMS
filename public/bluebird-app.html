@@ -177,8 +177,9 @@ select.field-input option{background:var(--navy-mid)}
 ══════════════════════════════════════════════════════ */
 #page-send{overflow-y:auto}
 .send-wrap{max-width:900px;margin:0 auto;padding:28px 24px;display:flex;flex-direction:column;gap:22px}
-.send-top{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
-.stat-card{background:var(--navy-mid);border-radius:8px;padding:18px 20px;border:1px solid rgba(192,154,47,.1);display:flex;flex-direction:column;gap:4px}
+.send-top{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.stat-card{background:var(--navy-mid);border-radius:8px;padding:18px 20px;border:1px solid rgba(192,154,47,.1);display:flex;flex-direction:column;gap:4px;position:relative;overflow:hidden}
+.stat-card .s-icon{position:absolute;top:14px;right:16px;font-size:20px;opacity:.28}
 .stat-card .s-num{font-size:28px;font-weight:800;line-height:1}
 .stat-card .s-lbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
 .stat-card.c-sent .s-num{color:#16a34a}
@@ -187,13 +188,28 @@ select.field-input option{background:var(--navy-mid)}
 .stat-card.c-queue .s-num{color:var(--brass-light)}
 
 .send-panel{background:var(--navy-mid);border-radius:8px;padding:22px 24px;border:1px solid rgba(26,86,219,.1)}
-.send-panel h3{font-size:14px;font-weight:700;margin-bottom:16px;color:var(--brass-light);display:flex;align-items:center;gap:8px}
+.send-panel h3{font-size:14px;font-weight:700;margin:0;color:var(--brass-light);display:flex;align-items:center;gap:8px}
+.send-panel-head{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:18px}
 
-.prog-wrap{background:rgba(15,23,42,.05);border-radius:4px;height:10px;overflow:hidden;margin-bottom:8px}
+.window-badge{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:700;padding:5px 12px;border-radius:20px;white-space:nowrap}
+.window-badge.open{background:rgba(22,163,74,.12);color:#16a34a}
+.window-badge.closed{background:rgba(220,38,38,.1);color:#dc2626}
+.wb-dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex-shrink:0}
+.window-badge.open .wb-dot{animation:wbpulse 1.6s infinite}
+@keyframes wbpulse{0%,100%{opacity:1}50%{opacity:.25}}
+
+.control-meta{display:flex;flex-wrap:wrap;gap:8px 22px;font-size:12.5px;color:var(--muted);margin-bottom:18px;padding-bottom:16px;border-bottom:1px solid rgba(15,23,42,.05)}
+.control-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:20px}
+
+.prog-wrap{background:rgba(15,23,42,.05);border-radius:4px;height:10px;overflow:hidden;margin-bottom:8px;position:relative}
 .prog-bar{height:100%;background:linear-gradient(90deg,#3b82f6,#1a56db);width:0%;transition:width .35s ease;border-radius:4px}
-.prog-label{font-size:11.5px;color:var(--muted);margin-bottom:18px}
+.prog-label{font-size:11.5px;color:var(--muted);margin-bottom:18px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px}
+.prog-eta{color:var(--brass-light);font-weight:600}
 
+.log-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.log-head span{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
 .log-wrap{background:rgba(15,23,42,.06);border-radius:var(--r);padding:12px 14px;font-family:'Cascadia Code','Courier New',monospace;font-size:11px;line-height:1.9;max-height:260px;overflow-y:auto;color:#475569}
+.log-empty{color:var(--muted);font-size:12px;opacity:.6;text-align:center;padding:22px 0;font-family:inherit}
 .log-sent{color:#16a34a}
 .log-fail{color:#dc2626}
 .log-skip{color:#94a3b8}
@@ -397,32 +413,52 @@ select.field-input option{background:var(--navy-mid)}
 
   <div class="send-top">
     <div class="stat-card c-queue">
+      <span class="s-icon">📥</span>
       <div class="s-num" id="st-queue">0</div>
       <div class="s-lbl">In Queue</div>
     </div>
     <div class="stat-card c-sent">
+      <span class="s-icon">✅</span>
       <div class="s-num" id="st-sent">0</div>
       <div class="s-lbl">Sent</div>
     </div>
     <div class="stat-card c-fail">
+      <span class="s-icon">⛔</span>
       <div class="s-num" id="st-fail">0</div>
       <div class="s-lbl">Failed</div>
+    </div>
+    <div class="stat-card c-skip">
+      <span class="s-icon">⊘</span>
+      <div class="s-num" id="st-skip">0</div>
+      <div class="s-lbl">Skipped</div>
     </div>
   </div>
 
   <!-- Controls -->
   <div class="send-panel">
-    <h3>🚀 Send Controls</h3>
-    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:16px;">
-      <div style="font-size:13px;color:var(--muted);">Delay between sends: <strong style="color:var(--white)">none</strong> — sends back-to-back as fast as Zoom responds</div>
-      <div style="font-size:13px;color:var(--muted);">Sending window: <strong style="color:var(--white)">7:00 PM – 6:00 AM</strong> Pakistan time</div>
+    <div class="send-panel-head">
+      <h3>🚀 Send Controls</h3>
+      <span class="window-badge" id="window-badge"></span>
+    </div>
+    <div class="control-meta">
+      <span>Delay between sends: <strong style="color:var(--white)">none</strong> — back-to-back as fast as Zoom responds</span>
+      <span>Sending window: <strong style="color:var(--white)">7:00 PM – 6:00 AM</strong> Pakistan time</span>
+    </div>
+    <div class="control-actions">
       <button class="btn btn-green" id="send-btn" onclick="startSend()" disabled>🚀 Start Sending</button>
       <button class="btn btn-red" id="cancel-btn" onclick="cancelSend()" style="display:none;">⛔ Cancel</button>
       <button class="btn btn-ghost btn-sm" onclick="resetStatuses()" id="reset-btn">↺ Reset Statuses</button>
     </div>
     <div class="prog-wrap"><div class="prog-bar" id="prog-bar"></div></div>
-    <div class="prog-label" id="prog-label">Select leads in Kanban, compose a template, then send.</div>
-    <div class="log-wrap" id="log-wrap"></div>
+    <div class="prog-label">
+      <span id="prog-label">Select leads in Kanban, compose a template, then send.</span>
+      <span class="prog-eta" id="prog-eta"></span>
+    </div>
+    <div class="log-head">
+      <span>Activity Log</span>
+      <button class="btn btn-ghost btn-sm" onclick="clearLog()">🧹 Clear</button>
+    </div>
+    <div class="log-wrap" id="log-wrap"><div class="log-empty">Logs will appear here once you start sending.</div></div>
   </div>
 
   <!-- Queue table -->
@@ -1108,8 +1144,10 @@ function renderSendPage() {
   document.getElementById('st-queue').textContent = selected.length;
   document.getElementById('st-sent').textContent  = leads.filter(l=>l.status==='sent').length;
   document.getElementById('st-fail').textContent  = leads.filter(l=>l.status==='failed').length;
+  document.getElementById('st-skip').textContent  = leads.filter(l=>l.status==='skipped').length;
   document.getElementById('send-btn').disabled = selected.length === 0 || sending;
   document.getElementById('queue-count').textContent = selected.length;
+  updateWindowBadge();
 
   const tbody = document.getElementById('queue-tbody');
   if (!selected.length) {
@@ -1158,6 +1196,32 @@ function sendWindowMessage() {
   return `⏰ Sending opens at 7:00 PM Pakistan time — ${h}h ${m}m from now`;
 }
 
+function updateWindowBadge() {
+  const badge = document.getElementById('window-badge');
+  if (!badge) return;
+  if (inSendWindow()) {
+    badge.className = 'window-badge open';
+    badge.innerHTML = '<span class="wb-dot"></span> Window open';
+  } else {
+    const mins = (19 * 60 - pktMinutesNow() + 1440) % 1440;
+    const h = Math.floor(mins / 60), m = mins % 60;
+    badge.className = 'window-badge closed';
+    badge.innerHTML = `<span class="wb-dot"></span> Opens in ${h}h ${m}m`;
+  }
+}
+setInterval(updateWindowBadge, 30000);
+
+function clearLog() {
+  document.getElementById('log-wrap').innerHTML = '<div class="log-empty">Logs will appear here once you start sending.</div>';
+  document.getElementById('prog-eta').textContent = '';
+}
+
+function formatEta(ms) {
+  const totalSec = Math.round(ms / 1000);
+  const m = Math.floor(totalSec / 60), s = totalSec % 60;
+  return m > 0 ? `~${m}m ${s}s remaining` : `~${s}s remaining`;
+}
+
 async function startSend() {
   const queue = leads.filter(l => l.selected);
   if (!queue.length) { toast('No leads selected.'); return; }
@@ -1193,6 +1257,8 @@ async function startSend() {
   addLog('log-info', `▶  Starting — ${queue.length} leads queued · provider: ${currentProv}`);
 
   let sent = 0, failed = 0, skipped = 0;
+  const sendDurations = [];
+  document.getElementById('prog-eta').textContent = '';
 
   for (let i = 0; i < queue.length; i++) {
     if (abortSend) { addLog('log-warn', '⛔  Send cancelled by user.'); break; }
@@ -1231,7 +1297,10 @@ async function startSend() {
 
     currentSendingId = lead.id;
     renderSendPage();
+    const t0 = Date.now();
     const result = await sendSMS(lead, msg);
+    sendDurations.push(Date.now() - t0);
+    if (sendDurations.length > 20) sendDurations.shift();
 
     if (result.ok) {
       lead.status = 'sent';
@@ -1245,11 +1314,17 @@ async function startSend() {
       dbUpdate(lead.id, { status: 'failed' });
     }
 
+    const remaining = queue.length - (i + 1);
+    if (remaining > 0 && sendDurations.length) {
+      const avg = sendDurations.reduce((a,b) => a+b, 0) / sendDurations.length;
+      document.getElementById('prog-eta').textContent = formatEta(avg * remaining);
+    }
     renderSendPage();
   }
 
   currentSendingId = null;
   renderSendPage();
+  document.getElementById('prog-eta').textContent = '';
   addLog('log-info', `■  Done — ${sent} sent · ${failed} failed · ${skipped} skipped`);
   document.getElementById('prog-label').textContent = `Complete — ${sent} sent · ${failed} failed · ${skipped} skipped`;
   document.getElementById('send-btn').style.display = '';

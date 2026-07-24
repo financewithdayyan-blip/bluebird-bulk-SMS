@@ -32,11 +32,11 @@
   --shadow:      0 4px 20px rgba(15,23,42,.12);
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-html{height:100%}
-body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--navy);color:var(--white);height:100vh;display:flex;flex-direction:column;overflow:hidden}
+html{height:100%;overflow-x:hidden}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--navy);color:var(--white);height:100vh;display:flex;flex-direction:column;overflow:hidden;max-width:100vw}
 
 /* ── NAV ──────────────────────────────────────────────── */
-nav{background:var(--navy-mid);border-bottom:2px solid var(--brass-dim);display:flex;align-items:center;padding:0 24px;height:54px;gap:4px;position:sticky;top:0;z-index:200;box-shadow:var(--shadow)}
+nav{background:var(--navy-mid);border-bottom:2px solid var(--brass-dim);display:flex;align-items:center;padding:0 24px;height:54px;gap:4px;position:sticky;top:0;z-index:200;box-shadow:var(--shadow);min-width:0;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin}
 .nav-logo{display:flex;align-items:center;gap:9px;font-size:15px;font-weight:800;color:var(--brass-light);letter-spacing:.05em;text-transform:uppercase;margin-right:20px;flex-shrink:0}
 .nav-logo svg{flex-shrink:0}
 .nav-tab{padding:6px 16px;border-radius:var(--r);border:none;background:transparent;color:var(--muted);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:7px;transition:all .15s;position:relative}
@@ -50,7 +50,7 @@ nav{background:var(--navy-mid);border-bottom:2px solid var(--brass-dim);display:
 .nav-pill strong{color:var(--white);font-size:13px}
 
 /* ── PAGES ────────────────────────────────────────────── */
-.page{display:none;flex:1;overflow:hidden;flex-direction:column}
+.page{display:none;flex:1;overflow:hidden;flex-direction:column;min-width:0}
 .page.active{display:flex}
 
 /* ── SHARED UTILS ─────────────────────────────────────── */
@@ -335,7 +335,7 @@ select.field-input option{background:var(--navy-mid)}
   <div class="nav-spacer"></div>
   <div class="nav-pill">Leads <strong id="hdr-total">0</strong></div>
   <div class="nav-pill">Selected <strong id="hdr-sel">0</strong></div>
-  <div class="nav-pill" id="nav-user" style="display:none" title="Signed in">👤 <strong id="nav-user-email" style="font-size:11px"></strong></div>
+  <div class="nav-pill" id="nav-user" style="display:none;flex-shrink:0" title="Signed in">👤 <strong id="nav-user-email" style="font-size:11px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:middle"></strong></div>
   <button class="btn btn-ghost btn-sm" id="signout-btn" style="display:none;margin-left:8px" onclick="signOut()">Sign out</button>
 </nav>
 

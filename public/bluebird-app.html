@@ -447,7 +447,7 @@ select.field-input option{background:var(--navy-mid)}
     <div class="control-actions">
       <button class="btn btn-green" id="send-btn" onclick="startSend()" disabled>🚀 Start Sending</button>
       <button class="btn btn-red" id="cancel-btn" onclick="cancelSend()" style="display:none;">⛔ Cancel</button>
-      <button class="btn btn-ghost btn-sm" onclick="resetStatuses()" id="reset-btn" title="Resets status only for leads currently selected in the queue">↺ Reset Queue Statuses</button>
+      <button class="btn btn-ghost btn-sm" onclick="resetStatuses()" id="reset-btn" title="Retries failed/skipped leads in the current queue. Never touches Sent leads.">↺ Retry Failed/Skipped</button>
     </div>
     <div class="prog-wrap"><div class="prog-bar" id="prog-bar"></div></div>
     <div class="prog-label">
@@ -1173,9 +1173,11 @@ function renderSendPage() {
 }
 
 async function resetStatuses() {
-  const queue = leads.filter(l => l.selected && l.status !== 'pending');
-  if (!queue.length) { toast('Nothing to reset — no sent/failed/skipped leads in the current queue.'); return; }
-  if (!confirm(`Reset status for ${queue.length} lead${queue.length !== 1 ? 's' : ''} in the current queue back to Pending? This only affects selected leads, not your whole list.`)) return;
+  // Never touch 'sent' — there's no legitimate reason to "un-send" a message.
+  // This only exists to let failed/skipped leads be retried.
+  const queue = leads.filter(l => l.selected && (l.status === 'failed' || l.status === 'skipped'));
+  if (!queue.length) { toast('Nothing to reset — no failed/skipped leads in the current queue. (Sent leads are never reset.)'); return; }
+  if (!confirm(`Reset status for ${queue.length} failed/skipped lead${queue.length !== 1 ? 's' : ''} in the current queue back to Pending so they can be retried? Sent leads are never affected.`)) return;
   const ids = queue.map(l => l.id);
   queue.forEach(l => l.status = 'pending');
   renderSendPage();

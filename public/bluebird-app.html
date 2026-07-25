@@ -445,6 +445,10 @@ select.field-input option{background:var(--navy-mid)}
       <span>Sending window: <strong style="color:var(--white)">7:00 PM – 6:00 AM</strong> Pakistan time</span>
     </div>
     <div class="control-actions">
+      <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);" id="send-from-wrap">
+        Send from:
+        <select class="field-input" id="send-from" style="width:auto;min-width:160px;"></select>
+      </div>
       <button class="btn btn-green" id="send-btn" onclick="startSend()" disabled>🚀 Start Sending</button>
       <button class="btn btn-red" id="cancel-btn" onclick="cancelSend()" style="display:none;">⛔ Cancel</button>
       <button class="btn btn-ghost btn-sm" onclick="resetStatuses()" id="reset-btn" title="Retries failed/skipped leads in the current queue. Never touches Sent leads.">↺ Retry Failed/Skipped</button>
@@ -505,8 +509,10 @@ select.field-input option{background:var(--navy-mid)}
         <strong style="color:var(--brass-light);">Configured server-side</strong><br/>
         Zoom credentials are never stored in the browser. Set these in <code>.env.local</code> (and in Vercel → Project → Environment Variables for production):<br/>
         <code>ZOOM_ACCOUNT_ID</code> · <code>ZOOM_CLIENT_ID</code> · <code>ZOOM_CLIENT_SECRET</code> · <code>ZOOM_FROM_NUMBER</code> · <code>ZOOM_USER_EMAIL</code><br/>
+        Optional second number (pick which one to send from at send time): <code>ZOOM_FROM_NUMBER_2</code> · <code>ZOOM_USER_EMAIL_2</code> · <code>ZOOM_LABEL</code> / <code>ZOOM_LABEL_2</code> (display names)<br/>
         Sends via <code>POST /v2/phone/sms/messages</code> through this app's <code>/api/send-sms</code> route. Use <em>Test Connection</em> below to verify.
       </div>
+      <div id="zoom-numbers-status" style="margin-top:10px;font-size:12px;color:var(--muted);"></div>
     </div>
 
     <div class="provider-form" id="prov-openphone">
@@ -1260,7 +1266,8 @@ async function startSend() {
   const skipSent   = document.getElementById('t-skip-sent').checked;
   const doLog      = document.getElementById('t-console').checked;
 
-  addLog('log-info', `▶  Starting — ${queue.length} leads queued · provider: ${currentProv}`);
+  const fromNum = zoomNumbers.find(n => n.key === (document.getElementById('send-from')?.value || '1'));
+  addLog('log-info', `▶  Starting — ${queue.length} leads queued · provider: ${currentProv}${fromNum ? ' · from: ' + fromNum.label + ' (' + fromNum.phone + ')' : ''}`);
 
   let sent = 0, failed = 0, skipped = 0;
   const sendDurations = [];
@@ -1312,8 +1319,9 @@ async function startSend() {
       lead.status = 'sent';
       lead.stage = 'Contacted';
       sent++;
-      addLog('log-sent', `✓  Sent → ${lead.phone} · moved to Contacted`);
-      dbUpdate(lead.id, { status: 'sent', stage: 'Contacted' });
+      const fromLabel = zoomNumbers.find(n => n.phone === result.from)?.label;
+      addLog('log-sent', `✓  Sent → ${lead.phone}${fromLabel ? ' from ' + fromLabel : ''} · moved to Contacted`);
+      dbUpdate(lead.id, { status: 'sent', stage: 'Contacted', sent_from: result.from || null, sent_at: new Date().toISOString() });
     } else {
       lead.status = 'failed'; failed++;
       addLog('log-fail', `✗  Failed → ${lead.phone}: ${result.error||''}`);
@@ -1381,13 +1389,40 @@ async function twilioSend(lead, message) {
 
 async function zoomSend(lead, message) {
   // Credentials live server-side (.env.local / Vercel env) — see /api/send-sms
+  const fromKey = document.getElementById('send-from')?.value || '1';
   const res = await fetch('/api/send-sms', {
     method: 'POST',
     headers: {'Content-Type':'application/json', 'Authorization':'Bearer ' + authToken()},
-    body: JSON.stringify({ to: lead.phone, message }),
+    body: JSON.stringify({ to: lead.phone, message, from: fromKey }),
   });
   const data = await res.json().catch(()=>({}));
-  return data.ok ? {ok:true} : {ok:false, error: data.error || res.statusText};
+  return data.ok ? {ok:true, from: data.from} : {ok:false, error: data.error || res.statusText};
+}
+
+/* ── Zoom numbers (1 or 2, chosen per send) ── */
+let zoomNumbers = [];
+
+async function loadZoomNumbers() {
+  try {
+    const res = await fetch('/api/send-sms', { headers: {'Authorization':'Bearer ' + authToken()} });
+    const data = await res.json();
+    if (!data.ok) { document.getElementById('zoom-numbers-status').textContent = '⚠️ ' + data.error; return; }
+    zoomNumbers = data.numbers;
+    const sel = document.getElementById('send-from');
+    if (sel) {
+      sel.innerHTML = zoomNumbers.map(n => `<option value="${n.key}" ${!n.ok?'disabled':''}>${esc(n.label)} — ${esc(n.phone)}${!n.ok?' (error)':''}</option>`).join('');
+      document.getElementById('send-from-wrap').style.display = zoomNumbers.length > 1 ? '' : 'none';
+    }
+    const statusEl = document.getElementById('zoom-numbers-status');
+    if (statusEl) {
+      statusEl.innerHTML = zoomNumbers.map(n =>
+        n.ok ? `✅ ${esc(n.label)} (${esc(n.phone)}) connected` : `❌ ${esc(n.label)} (${esc(n.phone)}): ${esc(n.error)}`
+      ).join('<br/>');
+    }
+  } catch (e) {
+    const statusEl = document.getElementById('zoom-numbers-status');
+    if (statusEl) statusEl.textContent = '⚠️ ' + e.message;
+  }
 }
 
 async function openphoneSend(lead, message) {
@@ -1440,15 +1475,11 @@ function loadSettings() {
 async function testProvider() {
   if (currentProv === 'zoom') {
     toast('🔌 Testing Zoom connection…');
-    try {
-      const res = await fetch('/api/send-sms', { headers: {'Authorization':'Bearer ' + authToken()} });
-      const data = await res.json();
-      toast(data.ok
-        ? `✅ Zoom connected — sending as ${data.from}`
-        : `❌ Zoom: ${data.error}`);
-    } catch (e) {
-      toast('❌ Zoom test failed: ' + e.message);
-    }
+    await loadZoomNumbers();
+    const allOk = zoomNumbers.length && zoomNumbers.every(n => n.ok);
+    toast(allOk
+      ? `✅ Zoom connected — ${zoomNumbers.map(n=>n.phone).join(', ')}`
+      : '⚠️ See status under the Zoom Phone tab for details');
     return;
   }
   toast(`🔌 Testing ${currentProv}… (check console for result)`);
@@ -1689,7 +1720,7 @@ function applySession(session) {
   document.getElementById('signout-btn').style.display = session ? '' : 'none';
   if (session) {
     document.getElementById('nav-user-email').textContent = session.user.email;
-    if (session.user.id !== prevUserId) { loadLeads(); loadTemplates(); loadPresetTags(); }
+    if (session.user.id !== prevUserId) { loadLeads(); loadTemplates(); loadPresetTags(); loadZoomNumbers(); }
   } else if (prevUserId) {
     leads = [];
     renderKanban(); updateNavBadges(); refreshTagFilterBar();

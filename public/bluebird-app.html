@@ -518,6 +518,7 @@ select.field-input option{background:var(--navy-mid)}
         Sends via <code>POST /v2/phone/sms/messages</code> through this app's <code>/api/send-sms</code> route. Use <em>Test Connection</em> below to verify.
       </div>
       <div id="zoom-numbers-status" style="margin-top:10px;font-size:12px;color:var(--muted);"></div>
+      <div id="zoom-limits" style="margin-top:14px;display:flex;flex-direction:column;gap:8px;"></div>
     </div>
 
     <div class="provider-form" id="prov-openphone">
@@ -1348,7 +1349,8 @@ async function startSend() {
   const skipSent   = document.getElementById('t-skip-sent').checked;
   const doLog      = document.getElementById('t-console').checked;
 
-  const fromNum = zoomNumbers.find(n => n.key === (document.getElementById('send-from')?.value || '1'));
+  let activeFromKey = document.getElementById('send-from')?.value || (zoomNumbers[0]?.key || '1');
+  const fromNum = zoomNumbers.find(n => n.key === activeFromKey);
   addLog('log-info', `▶  Starting — ${queue.length} leads queued · provider: ${currentProv}${fromNum ? ' · from: ' + fromNum.label + ' (' + fromNum.phone + ')' : ''}`);
 
   let sent = 0, failed = 0, skipped = 0;
@@ -1386,6 +1388,27 @@ async function startSend() {
       continue;
     }
 
+    // Auto-switch numbers if the active one has hit its daily limit
+    if (currentProv === 'zoom' && zoomNumbers.length > 1) {
+      const activeNum = zoomNumbers.find(n => n.key === activeFromKey);
+      const limit = numberLimits[activeFromKey] || 1000;
+      const used = activeNum ? countSentLast24h(activeNum.phone) : 0;
+      if (activeNum && used >= limit) {
+        const alt = zoomNumbers.find(n => n.key !== activeFromKey && n.ok);
+        const altLimit = alt ? (numberLimits[alt.key] || 1000) : 0;
+        const altUsed = alt ? countSentLast24h(alt.phone) : 0;
+        if (alt && altUsed < altLimit) {
+          addLog('log-warn', `⚠  ${activeNum.label} hit its limit (${used}/${limit}) — switching to ${alt.label}`);
+          activeFromKey = alt.key;
+          const sel = document.getElementById('send-from');
+          if (sel) sel.value = activeFromKey;
+        } else {
+          addLog('log-warn', `⛔  All numbers have reached today's limit (${activeNum.label}: ${used}/${limit}${alt ? `, ${alt.label}: ${altUsed}/${altLimit}` : ''}). Stopping — remaining leads stay pending.`);
+          break;
+        }
+      }
+    }
+
     const msg = mergeTemplate(lead);
     addLog('log-info', `→  ${lead.name||lead.phone}: "${msg.slice(0,70)}${msg.length>70?'…':''}"`);
     if (doLog) console.log('[Bluebird SMS]', lead, msg);
@@ -1393,17 +1416,19 @@ async function startSend() {
     currentSendingId = lead.id;
     renderSendPage();
     const t0 = Date.now();
-    const result = await sendSMS(lead, msg);
+    const result = await sendSMS(lead, msg, activeFromKey);
     sendDurations.push(Date.now() - t0);
     if (sendDurations.length > 20) sendDurations.shift();
 
     if (result.ok) {
       lead.status = 'sent';
       lead.stage = 'Contacted';
+      lead.sent_from = result.from || null;
+      lead.sent_at = new Date().toISOString();
       sent++;
       const fromLabel = zoomNumbers.find(n => n.phone === result.from)?.label;
       addLog('log-sent', `✓  Sent → ${lead.phone}${fromLabel ? ' from ' + fromLabel : ''} · moved to Contacted`);
-      dbUpdate(lead.id, { status: 'sent', stage: 'Contacted', sent_from: result.from || null, sent_at: new Date().toISOString() });
+      dbUpdate(lead.id, { status: 'sent', stage: 'Contacted', sent_from: lead.sent_from, sent_at: lead.sent_at });
     } else {
       lead.status = 'failed'; failed++;
       addLog('log-fail', `✗  Failed → ${lead.phone}: ${result.error||''}`);
@@ -1437,11 +1462,11 @@ function cancelSend() { abortSend = true; }
 /* ═══════════════════════════════════════════════════
    SMS PROVIDER DISPATCH
 ═══════════════════════════════════════════════════ */
-async function sendSMS(lead, message) {
+async function sendSMS(lead, message, fromKey) {
   try {
     if (currentProv === 'demo') return await demoSend(lead, message);
     if (currentProv === 'twilio') return await twilioSend(lead, message);
-    if (currentProv === 'zoom') return await zoomSend(lead, message);
+    if (currentProv === 'zoom') return await zoomSend(lead, message, fromKey);
     if (currentProv === 'openphone') return await openphoneSend(lead, message);
     return {ok:false, error:'Unknown provider'};
   } catch(e) {
@@ -1469,20 +1494,21 @@ async function twilioSend(lead, message) {
   return {ok:false, error: err.message || res.statusText};
 }
 
-async function zoomSend(lead, message) {
+async function zoomSend(lead, message, fromKey) {
   // Credentials live server-side (.env.local / Vercel env) — see /api/send-sms
-  const fromKey = document.getElementById('send-from')?.value || '1';
+  const key = fromKey || document.getElementById('send-from')?.value || '1';
   const res = await fetch('/api/send-sms', {
     method: 'POST',
     headers: {'Content-Type':'application/json', 'Authorization':'Bearer ' + authToken()},
-    body: JSON.stringify({ to: lead.phone, message, from: fromKey }),
+    body: JSON.stringify({ to: lead.phone, message, from: key }),
   });
   const data = await res.json().catch(()=>({}));
   return data.ok ? {ok:true, from: data.from} : {ok:false, error: data.error || res.statusText};
 }
 
-/* ── Zoom numbers (1 or 2, chosen per send) ── */
+/* ── Zoom numbers (1 or 2, chosen per send, with auto-switch on daily limit) ── */
 let zoomNumbers = [];
+let numberLimits = {}; // numberKey → daily limit (default 1000)
 
 async function loadZoomNumbers() {
   try {
@@ -1501,10 +1527,49 @@ async function loadZoomNumbers() {
         n.ok ? `✅ ${esc(n.label)} (${esc(n.phone)}) connected` : `❌ ${esc(n.label)} (${esc(n.phone)}): ${esc(n.error)}`
       ).join('<br/>');
     }
+    renderNumberLimitInputs();
   } catch (e) {
     const statusEl = document.getElementById('zoom-numbers-status');
     if (statusEl) statusEl.textContent = '⚠️ ' + e.message;
   }
+}
+
+async function loadNumberLimits() {
+  const { data, error } = await sb.from('number_limits').select('number_key, daily_limit');
+  if (error) return;
+  numberLimits = Object.fromEntries(data.map(r => [r.number_key, r.daily_limit]));
+  renderNumberLimitInputs();
+}
+
+function renderNumberLimitInputs() {
+  const el = document.getElementById('zoom-limits');
+  if (!el || !zoomNumbers.length) return;
+  el.innerHTML = '<div class="section-label" style="margin-bottom:2px;">Daily send limit per number</div>' +
+    zoomNumbers.map(n => `
+      <div style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted);flex-wrap:wrap;">
+        <span style="min-width:200px;">${esc(n.label)} (${esc(n.phone)})</span>
+        <input type="number" class="field-input" style="width:90px;" min="1" max="1000"
+          value="${numberLimits[n.key] || 1000}" onchange="saveNumberLimit('${n.key}', this.value)" />
+        <span>msgs / 24h · Zoom cap is 1000</span>
+        <span style="color:var(--muted);">— used: <strong style="color:var(--white);">${countSentLast24h(n.phone)}</strong></span>
+      </div>
+    `).join('') +
+    (zoomNumbers.length > 1 ? '<p class="field-desc" style="margin-top:2px;">When a number hits its limit mid-send, the app automatically switches to the other one and logs the switch.</p>' : '');
+}
+
+async function saveNumberLimit(key, value) {
+  const limit = Math.max(1, Math.min(1000, parseInt(value) || 1000));
+  numberLimits[key] = limit;
+  const { error } = await sb.from('number_limits')
+    .upsert({ number_key: key, daily_limit: limit }, { onConflict: 'user_id,number_key' });
+  if (error) { toast('⚠️ Failed to save limit: ' + error.message); return; }
+  const label = zoomNumbers.find(n => n.key === key)?.label || key;
+  toast(`✅ ${label} limit set to ${limit}/24h`);
+}
+
+function countSentLast24h(phone) {
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  return leads.filter(l => l.sent_from === phone && l.sent_at && new Date(l.sent_at).getTime() >= cutoff).length;
 }
 
 async function openphoneSend(lead, message) {
@@ -1808,7 +1873,7 @@ function applySession(session) {
   document.getElementById('signout-btn').style.display = session ? '' : 'none';
   if (session) {
     document.getElementById('nav-user-email').textContent = session.user.email;
-    if (session.user.id !== prevUserId) { loadLeads(); loadTemplates(); loadPresetTags(); loadZoomNumbers(); }
+    if (session.user.id !== prevUserId) { loadLeads(); loadTemplates(); loadPresetTags(); loadZoomNumbers(); loadNumberLimits(); }
   } else if (prevUserId) {
     leads = [];
     renderKanban(); updateNavBadges(); refreshTagFilterBar();
@@ -1834,6 +1899,7 @@ async function loadLeads() {
   }
   leads = all.map(r => ({ ...r, selected: false, tags: r.tags || [] }));
   updateNavBadges(); renderKanban(); refreshTagFilterBar();
+  renderNumberLimitInputs(); // refresh "used" counts now that sent_from/sent_at are in
   // Notes load in the background so leads appear immediately; card previews
   // and note-count badges backfill once they're in.
   loadNoteCounts().then(renderKanban);

@@ -106,7 +106,12 @@ select.field-input option{background:var(--navy-mid)}
 .k-col-checkbox-wrap.all-sel{background:var(--brass-glow);border-color:var(--brass-dim)}
 .k-col-checkbox-wrap input[type=checkbox]{width:13px;height:13px;margin:0;cursor:pointer;accent-color:var(--brass)}
 .k-col-checkbox-wrap span{font-size:10px;font-weight:700;color:var(--muted);white-space:nowrap}
-.k-cards{flex:1;background:rgba(26,86,219,.04);border-radius:0 0 var(--r) var(--r);padding:10px;display:flex;flex-direction:column;gap:8px;overflow-y:auto;max-height:calc(100vh - 200px);min-height:100px}
+.k-cards{flex:1;background:rgba(26,86,219,.04);border-radius:0;padding:10px;display:flex;flex-direction:column;gap:8px;overflow-y:auto;max-height:calc(100vh - 240px);min-height:100px}
+.k-pager{display:none;align-items:center;justify-content:center;gap:10px;padding:7px 10px;background:var(--navy-panel);border-radius:0 0 var(--r) var(--r);border-top:1px solid rgba(15,23,42,.06)}
+.pager-btn{background:var(--navy-card);border:1px solid rgba(26,86,219,.2);color:var(--brass);border-radius:4px;width:22px;height:22px;font-size:12px;line-height:1;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-family:inherit;transition:all .15s;padding:0}
+.pager-btn:hover:not(:disabled){background:rgba(26,86,219,.15)}
+.pager-btn:disabled{opacity:.3;cursor:not-allowed}
+.pager-info{font-size:10.5px;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
 .k-card{background:var(--navy-card);border-radius:var(--r);padding:11px 13px;border-left:3px solid var(--col-color,var(--brass-dim));cursor:pointer;transition:background .12s,transform .12s;position:relative}
 .k-card:hover{background:var(--navy-hover);transform:translateY(-1px)}
 .k-card.selected{background:var(--navy-hover);box-shadow:0 0 0 1px var(--brass)}
@@ -345,7 +350,7 @@ select.field-input option{background:var(--navy-mid)}
 <div class="page active" id="page-kanban">
   <div class="kanban-toolbar">
     <button class="btn btn-brass btn-sm" onclick="openImportModal()">📂 Import CSV</button>
-    <input class="kanban-search" id="k-search" placeholder="🔍  Search name, phone, address…" oninput="renderKanban()"/>
+    <input class="kanban-search" id="k-search" placeholder="🔍  Search name, phone, address…" oninput="onSearchInput()"/>
     <button class="btn btn-ghost btn-sm" onclick="selectAllVisible()">Select All</button>
     <button class="btn btn-ghost btn-sm" onclick="clearSelection()">✕ Clear</button>
     <button class="btn btn-brass btn-sm" onclick="goPage('send',document.querySelector('[data-page=send]'))" id="send-sel-btn" disabled>
@@ -842,6 +847,7 @@ async function importLeads() {
   const data = inserted;
   leads = leads.concat(data.map(r => ({ ...r, selected: false, tags: r.tags || [] })));
   updateNavBadges();
+  colPages['cold_call'] = 1;
   renderKanban();
   refreshTagFilterBar();
   toast(`✅ ${data.length} leads imported`);
@@ -928,8 +934,6 @@ function syncCardSelectionDOM(id, selected) {
 }
 
 function buildColumnEl(col) {
-  const colLeads = getVisibleColLeads(col);
-
   const colEl = document.createElement('div');
   colEl.className = 'k-col';
   colEl.style.setProperty('--col-color', col.color);
@@ -939,7 +943,7 @@ function buildColumnEl(col) {
   head.className = 'k-col-head';
   head.id = 'head-' + col.id;
   head.style.setProperty('--col-color', col.textColor);
-  head.innerHTML = colHeaderHTML(col, colLeads);
+  head.innerHTML = colHeaderHTML(col, getVisibleColLeads(col));
   colEl.appendChild(head);
 
   const cardsEl = document.createElement('div');
@@ -951,18 +955,64 @@ function buildColumnEl(col) {
   cardsEl.addEventListener('dragover', onDragOver);
   cardsEl.addEventListener('dragleave', onDragLeave);
   cardsEl.addEventListener('drop', onDrop);
+  colEl.appendChild(cardsEl);
 
-  if (colLeads.length === 0) {
+  const pagerEl = document.createElement('div');
+  pagerEl.className = 'k-pager';
+  pagerEl.id = 'pager-' + col.id;
+  colEl.appendChild(pagerEl);
+
+  fillColumnCards(col, cardsEl, pagerEl);
+  return colEl;
+}
+
+/* ── PAGINATION (per column, 50 leads/page) ── */
+const PAGE_SIZE = 50;
+let colPages = {}; // colId → current page (1-based)
+
+function fillColumnCards(col, cardsEl, pagerEl) {
+  const colLeads = getVisibleColLeads(col);
+  const total = colLeads.length;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  let page = colPages[col.id] || 1;
+  if (page > totalPages) page = totalPages;
+  if (page < 1) page = 1;
+  colPages[col.id] = page;
+
+  const start = (page - 1) * PAGE_SIZE;
+  const pageLeads = colLeads.slice(start, start + PAGE_SIZE);
+
+  cardsEl.innerHTML = '';
+  if (pageLeads.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'k-empty';
     empty.textContent = 'Drop leads here';
     cardsEl.appendChild(empty);
   } else {
-    colLeads.forEach(l => cardsEl.appendChild(buildCard(l, col)));
+    pageLeads.forEach(l => cardsEl.appendChild(buildCard(l, col)));
   }
 
-  colEl.appendChild(cardsEl);
-  return colEl;
+  if (total > PAGE_SIZE) {
+    pagerEl.style.display = 'flex';
+    pagerEl.innerHTML = `
+      <button class="pager-btn" ${page<=1?'disabled':''} onclick="goToPage('${col.id}',${page-1})" title="Previous page">‹</button>
+      <span class="pager-info">${start+1}–${Math.min(start+PAGE_SIZE,total)} of ${total}</span>
+      <button class="pager-btn" ${page>=totalPages?'disabled':''} onclick="goToPage('${col.id}',${page+1})" title="Next page">›</button>
+    `;
+  } else {
+    pagerEl.style.display = 'none';
+    pagerEl.innerHTML = '';
+  }
+}
+
+function goToPage(colId, page) {
+  const col = COLS.find(c => c.id === colId);
+  const cardsEl = document.getElementById('cards-' + colId);
+  const pagerEl = document.getElementById('pager-' + colId);
+  if (!col || !cardsEl || !pagerEl) return;
+  colPages[colId] = page;
+  fillColumnCards(col, cardsEl, pagerEl);
+  cardsEl.scrollTop = 0;
 }
 
 function renderKanban() {
@@ -1721,6 +1771,12 @@ function setTagFilter(tag, el) {
   activeTagFilter = tag;
   document.querySelectorAll('.tag-filter-chip').forEach(c => c.classList.remove('active'));
   el.classList.add('active');
+  colPages = {};
+  renderKanban();
+}
+
+function onSearchInput() {
+  colPages = {};
   renderKanban();
 }
 

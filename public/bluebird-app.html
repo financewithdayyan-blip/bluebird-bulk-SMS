@@ -872,73 +872,103 @@ function resetImportUI() {
    KANBAN
 ═══════════════════════════════════════════════════ */
 function getColForLead(l) {
-  return COLS.find(col => {
+  // Memoized per-lead, invalidated automatically when stage changes —
+  // avoids re-running string matching against every column on every render.
+  if (l._colCache && l._colCacheStage === l.stage) return l._colCache;
+  const col = COLS.find(col => {
     const stage = (l.stage || '').toLowerCase().replace(/[\s-]/g,'_');
     const colId = col.id.toLowerCase();
     return stage.includes(colId) || colId.includes(stage) ||
            l.stage.toLowerCase() === col.label.toLowerCase() ||
            (col.id === 'cold_call' && (!l.stage || l.stage.toLowerCase().includes('cold')));
   }) || COLS[0];
+  l._colCache = col;
+  l._colCacheStage = l.stage;
+  return col;
+}
+
+function isLeadVisible(l) {
+  const q = document.getElementById('k-search').value.toLowerCase();
+  if (q && !`${l.name} ${l.phone} ${l.address}`.toLowerCase().includes(q)) return false;
+  if (activeTagFilter && !(l.tags||[]).includes(activeTagFilter)) return false;
+  return true;
+}
+
+function getVisibleColLeads(col) {
+  return leads.filter(l => getColForLead(l).id === col.id && isLeadVisible(l));
+}
+
+function colHeaderHTML(col, colLeads) {
+  const allColSelected = colLeads.length > 0 && colLeads.every(l => l.selected);
+  const someColSelected = !allColSelected && colLeads.some(l => l.selected);
+  const selCount = colLeads.filter(l => l.selected).length;
+  return `
+    <span class="col-title">${col.label}</span>
+    <span class="col-count">${colLeads.length}</span>
+    ${colLeads.length > 0 ? `
+    <label class="k-col-checkbox-wrap ${allColSelected?'all-sel':''}" title="Select all ${col.label} leads" onclick="event.preventDefault();selectPhase('${col.id}')">
+      <input type="checkbox" ${allColSelected?'checked':''} style="${someColSelected?'opacity:.5':''}" readonly />
+      <span>${(allColSelected||someColSelected) ? selCount+'/'+colLeads.length : 'Select all'}</span>
+    </label>` : ''}
+  `;
+}
+
+function updateColumnHeader(col) {
+  const head = document.getElementById('head-' + col.id);
+  if (!head) return;
+  head.innerHTML = colHeaderHTML(col, getVisibleColLeads(col));
+}
+
+function syncCardSelectionDOM(id, selected) {
+  const card = document.querySelector(`.k-card[data-lead-id="${id}"]`);
+  if (!card) return;
+  card.classList.toggle('selected', selected);
+  const cb = card.querySelector('.k-card-check');
+  if (cb) cb.checked = selected;
+}
+
+function buildColumnEl(col) {
+  const colLeads = getVisibleColLeads(col);
+
+  const colEl = document.createElement('div');
+  colEl.className = 'k-col';
+  colEl.style.setProperty('--col-color', col.color);
+  colEl.dataset.colId = col.id;
+
+  const head = document.createElement('div');
+  head.className = 'k-col-head';
+  head.id = 'head-' + col.id;
+  head.style.setProperty('--col-color', col.textColor);
+  head.innerHTML = colHeaderHTML(col, colLeads);
+  colEl.appendChild(head);
+
+  const cardsEl = document.createElement('div');
+  cardsEl.className = 'k-cards';
+  cardsEl.id = 'cards-' + col.id;
+  cardsEl.dataset.colId = col.id;
+
+  // Drop zone events
+  cardsEl.addEventListener('dragover', onDragOver);
+  cardsEl.addEventListener('dragleave', onDragLeave);
+  cardsEl.addEventListener('drop', onDrop);
+
+  if (colLeads.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'k-empty';
+    empty.textContent = 'Drop leads here';
+    cardsEl.appendChild(empty);
+  } else {
+    colLeads.forEach(l => cardsEl.appendChild(buildCard(l, col)));
+  }
+
+  colEl.appendChild(cardsEl);
+  return colEl;
 }
 
 function renderKanban() {
-  const q = document.getElementById('k-search').value.toLowerCase();
   const board = document.getElementById('kanban-board');
   board.innerHTML = '';
-
-  COLS.forEach(col => {
-    let colLeads = leads.filter(l => getColForLead(l).id === col.id);
-    if (q) colLeads = colLeads.filter(l =>
-      `${l.name} ${l.phone} ${l.address}`.toLowerCase().includes(q));
-    if (activeTagFilter) colLeads = colLeads.filter(l =>
-      (l.tags||[]).includes(activeTagFilter));
-
-    const allColSelected = colLeads.length > 0 && colLeads.every(l => l.selected);
-    const someColSelected = !allColSelected && colLeads.some(l => l.selected);
-    const selCount = colLeads.filter(l => l.selected).length;
-
-    const colEl = document.createElement('div');
-    colEl.className = 'k-col';
-    colEl.style.setProperty('--col-color', col.color);
-    colEl.dataset.colId = col.id;
-
-    const head = document.createElement('div');
-    head.className = 'k-col-head';
-    head.style.setProperty('--col-color', col.textColor);
-    head.innerHTML = `
-      <span class="col-title">${col.label}</span>
-      <span class="col-count">${colLeads.length}</span>
-      ${colLeads.length > 0 ? `
-      <label class="k-col-checkbox-wrap ${allColSelected?'all-sel':''}" title="Select all ${col.label} leads" onclick="event.preventDefault();selectPhase('${col.id}')">
-        <input type="checkbox" ${allColSelected?'checked':''} style="${someColSelected?'opacity:.5':''}" readonly />
-        <span>${(allColSelected||someColSelected) ? selCount+'/'+colLeads.length : 'Select all'}</span>
-      </label>` : ''}
-    `;
-    colEl.appendChild(head);
-
-    const cardsEl = document.createElement('div');
-    cardsEl.className = 'k-cards';
-    cardsEl.id = 'cards-' + col.id;
-    cardsEl.dataset.colId = col.id;
-
-    // Drop zone events
-    cardsEl.addEventListener('dragover', onDragOver);
-    cardsEl.addEventListener('dragleave', onDragLeave);
-    cardsEl.addEventListener('drop', onDrop);
-
-    if (colLeads.length === 0) {
-      const empty = document.createElement('div');
-      empty.className = 'k-empty';
-      empty.textContent = 'Drop leads here';
-      cardsEl.appendChild(empty);
-    } else {
-      colLeads.forEach(l => cardsEl.appendChild(buildCard(l, col)));
-    }
-
-    colEl.appendChild(cardsEl);
-    board.appendChild(colEl);
-  });
-
+  COLS.forEach(col => board.appendChild(buildColumnEl(col)));
   updateSelCount();
 }
 
@@ -1020,7 +1050,11 @@ function onDrop(e) {
 
 function toggleCard(id) {
   const l = leads.find(x => x.id === id);
-  if (l) { l.selected = !l.selected; renderKanban(); }
+  if (!l) return;
+  l.selected = !l.selected;
+  syncCardSelectionDOM(id, l.selected);
+  updateColumnHeader(getColForLead(l));
+  updateSelCount();
 }
 
 async function copyLead(id, field) {
@@ -1036,27 +1070,22 @@ async function copyLead(id, field) {
 }
 
 function selectAllVisible() {
-  const q = document.getElementById('k-search').value.toLowerCase();
   leads.forEach(l => {
-    if (!q || `${l.name} ${l.phone} ${l.address}`.toLowerCase().includes(q)) l.selected = true;
+    if (isLeadVisible(l) && !l.selected) { l.selected = true; syncCardSelectionDOM(l.id, true); }
   });
-  renderKanban();
+  COLS.forEach(updateColumnHeader);
+  updateSelCount();
 }
 
 function selectPhase(colId) {
   const col = COLS.find(c => c.id === colId);
   if (!col) return;
-  // Get leads that belong to this column using same matching logic
-  const phaseLeads = leads.filter(l => {
-    const stage = (l.stage || '').toLowerCase().replace(/[\s-]/g,'_');
-    return stage.includes(colId) || colId.includes(stage) ||
-           l.stage.toLowerCase() === col.label.toLowerCase() ||
-           (colId === 'cold_call' && (!l.stage || l.stage.toLowerCase().includes('cold')));
-  });
+  const phaseLeads = getVisibleColLeads(col);
   // If all already selected → deselect the phase; otherwise select all
   const allSelected = phaseLeads.length > 0 && phaseLeads.every(l => l.selected);
-  phaseLeads.forEach(l => l.selected = !allSelected);
-  renderKanban();
+  phaseLeads.forEach(l => { l.selected = !allSelected; syncCardSelectionDOM(l.id, l.selected); });
+  updateColumnHeader(col);
+  updateSelCount();
   const n = phaseLeads.filter(l => l.selected).length;
   toast(allSelected
     ? `Deselected ${phaseLeads.length} ${col.label} leads`
@@ -1065,8 +1094,11 @@ function selectPhase(colId) {
 }
 
 function clearSelection() {
-  leads.forEach(l => l.selected = false);
-  renderKanban();
+  leads.forEach(l => {
+    if (l.selected) { l.selected = false; syncCardSelectionDOM(l.id, false); }
+  });
+  COLS.forEach(updateColumnHeader);
+  updateSelCount();
 }
 
 async function deleteSelected() {
@@ -1729,20 +1761,26 @@ function applySession(session) {
 
 /* ── LEAD PERSISTENCE (Supabase) ── */
 async function loadLeads() {
-  // Supabase caps each request at 1000 rows — page through until done
+  // Supabase caps each request at 1000 rows — fetch the page count up front,
+  // then fire all pages in parallel instead of one round-trip at a time.
   const page = 1000;
-  let from = 0, all = [];
-  while (true) {
-    const { data, error } = await sb.from('leads').select('*')
-      .order('created_at').order('id').range(from, from + page - 1);
-    if (error) { toast('⚠️ Failed to load leads: ' + error.message); return; }
-    all = all.concat(data);
-    if (data.length < page) break;
-    from += page;
+  const { count, error: countErr } = await sb.from('leads').select('id', { count: 'exact', head: true });
+  if (countErr) { toast('⚠️ Failed to load leads: ' + countErr.message); return; }
+  const pageCount = Math.max(1, Math.ceil((count || 0) / page));
+  const results = await Promise.all(
+    Array.from({ length: pageCount }, (_, i) =>
+      sb.from('leads').select('*').order('created_at').order('id').range(i * page, i * page + page - 1))
+  );
+  const all = [];
+  for (const r of results) {
+    if (r.error) { toast('⚠️ Failed to load leads: ' + r.error.message); return; }
+    all.push(...r.data);
   }
   leads = all.map(r => ({ ...r, selected: false, tags: r.tags || [] }));
-  await loadNoteCounts();
   updateNavBadges(); renderKanban(); refreshTagFilterBar();
+  // Notes load in the background so leads appear immediately; card previews
+  // and note-count badges backfill once they're in.
+  loadNoteCounts().then(renderKanban);
 }
 
 /* ── LEAD NOTES (all columns except Cold Call & Contacted) ── */
@@ -1753,19 +1791,22 @@ const NOTES_DISABLED_COLS = ['cold_call', 'contacted'];
 
 async function loadNoteCounts() {
   const page = 1000;
-  let from = 0;
+  const { count, error: countErr } = await sb.from('lead_notes').select('id', { count: 'exact', head: true });
+  if (countErr) return;
+  const pageCount = Math.max(1, Math.ceil((count || 0) / page));
+  const results = await Promise.all(
+    Array.from({ length: pageCount }, (_, i) =>
+      sb.from('lead_notes').select('lead_id, body')
+        .order('created_at', { ascending: false }).order('id', { ascending: false })
+        .range(i * page, i * page + page - 1))
+  );
   const counts = {}, latest = {};
-  while (true) {
-    const { data, error } = await sb.from('lead_notes').select('lead_id, body')
-      .order('created_at', { ascending: false }).order('id', { ascending: false })
-      .range(from, from + page - 1);
-    if (error) break;
-    data.forEach(n => {
+  for (const r of results) {
+    if (r.error) continue;
+    r.data.forEach(n => {
       counts[n.lead_id] = (counts[n.lead_id] || 0) + 1;
       if (latest[n.lead_id] === undefined) latest[n.lead_id] = n.body;
     });
-    if (data.length < page) break;
-    from += page;
   }
   noteCounts = counts;
   latestNotes = latest;

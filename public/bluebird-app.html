@@ -422,10 +422,10 @@ select.field-input option{background:var(--navy-mid)}
       <div class="s-num" id="st-queue">0</div>
       <div class="s-lbl">In Queue</div>
     </div>
-    <div class="stat-card c-sent">
+    <div class="stat-card c-sent" title="All-time total — kept in a separate log, so exporting/deleting old leads never reduces this count">
       <span class="s-icon">✅</span>
       <div class="s-num" id="st-sent">0</div>
-      <div class="s-lbl">Sent</div>
+      <div class="s-lbl">Sent (all-time)</div>
     </div>
     <div class="stat-card c-fail">
       <span class="s-icon">⛔</span>
@@ -1231,7 +1231,7 @@ function mergeTemplate(lead) {
 function renderSendPage() {
   const selected = leads.filter(l => l.selected);
   document.getElementById('st-queue').textContent = selected.length;
-  document.getElementById('st-sent').textContent  = leads.filter(l=>l.status==='sent').length;
+  document.getElementById('st-sent').textContent  = totalSentCount;
   document.getElementById('st-fail').textContent  = leads.filter(l=>l.status==='failed').length;
   document.getElementById('st-skip').textContent  = leads.filter(l=>l.status==='skipped').length;
   document.getElementById('send-btn').disabled = selected.length === 0 || sending;
@@ -1426,9 +1426,12 @@ async function startSend() {
       lead.sent_from = result.from || null;
       lead.sent_at = new Date().toISOString();
       sent++;
+      totalSentCount++;
+      sendLog.push({ phone: lead.phone, sent_from: lead.sent_from, sent_at: lead.sent_at });
       const fromLabel = zoomNumbers.find(n => n.phone === result.from)?.label;
       addLog('log-sent', `✓  Sent → ${lead.phone}${fromLabel ? ' from ' + fromLabel : ''} · moved to Contacted`);
       dbUpdate(lead.id, { status: 'sent', stage: 'Contacted', sent_from: lead.sent_from, sent_at: lead.sent_at });
+      logSend(lead.phone, lead.sent_from, lead.sent_at);
     } else {
       lead.status = 'failed'; failed++;
       addLog('log-fail', `✗  Failed → ${lead.phone}: ${result.error||''}`);
@@ -1509,6 +1512,8 @@ async function zoomSend(lead, message, fromKey) {
 /* ── Zoom numbers (1 or 2, chosen per send, with auto-switch on daily limit) ── */
 let zoomNumbers = [];
 let numberLimits = {}; // numberKey → daily limit (default 1000)
+let sendLog = [];        // rows from send_log within the last ~25h, for rolling-window checks
+let totalSentCount = 0;  // all-time send_log count — survives leads being exported/deleted
 
 async function loadZoomNumbers() {
   try {
@@ -1569,7 +1574,34 @@ async function saveNumberLimit(key, value) {
 
 function countSentLast24h(phone) {
   const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-  return leads.filter(l => l.sent_from === phone && l.sent_at && new Date(l.sent_at).getTime() >= cutoff).length;
+  return sendLog.filter(r => r.sent_from === phone && new Date(r.sent_at).getTime() >= cutoff).length;
+}
+
+// send_log is append-only and never touched by lead deletion, so these counts
+// (unlike a count over `leads`) stay accurate even after exporting/deleting old leads.
+async function loadSendLog() {
+  const { count: total, error: totalErr } = await sb.from('send_log').select('id', { count: 'exact', head: true });
+  if (!totalErr) totalSentCount = total || 0;
+
+  const page = 1000;
+  const cutoffIso = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+  const { count: recentCount, error: recentErr } = await sb.from('send_log')
+    .select('id', { count: 'exact', head: true }).gte('sent_at', cutoffIso);
+  if (recentErr) return;
+  const pageCount = Math.max(1, Math.ceil((recentCount || 0) / page));
+  const results = await Promise.all(
+    Array.from({ length: pageCount }, (_, i) =>
+      sb.from('send_log').select('phone, sent_from, sent_at').gte('sent_at', cutoffIso)
+        .order('sent_at').range(i * page, i * page + page - 1))
+  );
+  const all = [];
+  for (const r of results) {
+    if (r.error) return;
+    all.push(...r.data);
+  }
+  sendLog = all;
+  renderNumberLimitInputs();
+  renderSendPage();
 }
 
 async function openphoneSend(lead, message) {
@@ -1873,7 +1905,7 @@ function applySession(session) {
   document.getElementById('signout-btn').style.display = session ? '' : 'none';
   if (session) {
     document.getElementById('nav-user-email').textContent = session.user.email;
-    if (session.user.id !== prevUserId) { loadLeads(); loadTemplates(); loadPresetTags(); loadZoomNumbers(); loadNumberLimits(); }
+    if (session.user.id !== prevUserId) { loadLeads(); loadTemplates(); loadPresetTags(); loadZoomNumbers(); loadNumberLimits(); loadSendLog(); }
   } else if (prevUserId) {
     leads = [];
     renderKanban(); updateNavBadges(); refreshTagFilterBar();
@@ -2026,6 +2058,13 @@ function closeNotes() {
 async function dbUpdate(id, fields) {
   const { error } = await sb.from('leads').update(fields).eq('id', id);
   if (error) toast('⚠️ Save failed: ' + error.message);
+}
+
+// Persistent, append-only record of every send — kept in its own table so
+// deleting/exporting leads to free up DB space never touches these counts.
+async function logSend(phone, sentFrom, sentAt) {
+  const { error } = await sb.from('send_log').insert({ phone, sent_from: sentFrom, sent_at: sentAt });
+  if (error) toast('⚠️ Send log write failed: ' + error.message);
 }
 
 /* ── SAVED TEMPLATES (per tag, Supabase) ── */

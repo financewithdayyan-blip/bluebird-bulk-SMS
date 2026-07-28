@@ -1,7 +1,8 @@
 // Receives Zoom webhook events (starting with incoming SMS) so the app can
-// eventually auto-draft replies. Verifies the request is really from Zoom,
-// logs the raw event to `webhook_log`, and — for phone.sms_received — stores
-// a parsed row in `inbound_messages` matched to a lead by phone number.
+// auto-draft replies. Verifies the request is really from Zoom, logs the raw
+// event to `webhook_log`, and — for phone.sms_received — stores a parsed row
+// in `inbound_messages` matched to a lead by phone number, then (when a lead
+// matched) asks Claude to draft a reply following the saved framework.
 //
 // Required env vars:
 //   ZOOM_WEBHOOK_SECRET_TOKEN — shown by Zoom when you add an Event
@@ -12,9 +13,17 @@
 //     This app is single-tenant on the Zoom side (one account, gated by
 //     ALLOWED_EMAILS), so incoming messages are always attributed to this
 //     one user rather than resolved per-request.
+//   ANTHROPIC_API_KEY — used only server-side to draft replies.
 
 import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
+import Anthropic from '@anthropic-ai/sdk';
+
+// Cheap, fast model — a drafted SMS reply is a small, low-stakes generation
+// (a human reviews and approves before anything sends), so this isn't worth
+// spending Opus-tier tokens on. Swap to a more capable model here if the
+// drafts need more nuance than Haiku gives.
+const DRAFT_MODEL = 'claude-haiku-4-5';
 
 export const config = { api: { bodyParser: false } };
 
@@ -37,6 +46,35 @@ function toE164(raw) {
   return '+' + digits;
 }
 
+async function draftReply(sb, ownerUserId, leadId) {
+  const [{ data: lead }, { data: config }, { data: inbound }, { data: outbound }] = await Promise.all([
+    sb.from('leads').select('name, address').eq('id', leadId).maybeSingle(),
+    sb.from('ai_reply_config').select('framework_text').eq('user_id', ownerUserId).maybeSingle(),
+    sb.from('inbound_messages').select('body, received_at').eq('lead_id', leadId).order('received_at'),
+    sb.from('send_log').select('body, sent_at').eq('lead_id', leadId).not('body', 'is', null).order('sent_at'),
+  ]);
+
+  const framework = config?.framework_text;
+  if (!framework) throw new Error('No AI reply framework saved in Settings yet');
+
+  const transcript = [
+    ...(inbound || []).map((m) => ({ at: m.received_at, line: `[Them]: ${m.body}` })),
+    ...(outbound || []).map((m) => ({ at: m.sent_at, line: `[Us]: ${m.body}` })),
+  ].sort((a, b) => new Date(a.at) - new Date(b.at)).slice(-30).map((m) => m.line).join('\n');
+
+  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  const response = await anthropic.messages.create({
+    model: DRAFT_MODEL,
+    max_tokens: 300,
+    system: `You are Dayyan from Bluebird Acquisitions, texting a property owner who replied to a cold outreach SMS about buying their property for cash. Draft only the next text message to send them — 1 to 3 short sentences, sounding like a real person texting, not corporate. No greeting like "Dear", no signature. Follow these rules for what to say:\n\n${framework}\n\nProperty address: ${lead?.address || 'unknown'}\nOwner's name on file: ${lead?.name || 'unknown'}\n\nReply with ONLY the SMS text to send — no quotation marks, no explanation, no labels.`,
+    messages: [{ role: 'user', content: `Conversation so far (oldest to newest):\n${transcript}\n\nDraft the next reply from us.` }],
+  });
+
+  const text = response.content.find((b) => b.type === 'text')?.text?.trim();
+  if (!text) throw new Error('Model returned no text');
+  return text;
+}
+
 async function handleSmsReceived(sb, body) {
   const obj = body.payload?.object;
   if (!obj) return;
@@ -52,7 +90,7 @@ async function handleSmsReceived(sb, body) {
     leadId = lead?.id || null;
   }
 
-  const { error } = await sb.from('inbound_messages').insert({
+  const { data: inserted, error } = await sb.from('inbound_messages').insert({
     user_id: ownerUserId,
     lead_id: leadId,
     from_phone: fromPhone,
@@ -60,10 +98,24 @@ async function handleSmsReceived(sb, body) {
     body: obj.message || '',
     zoom_message_id: obj.message_id || null,
     received_at: obj.date_time || new Date().toISOString(),
-  });
+  }).select('id').maybeSingle();
   // Zoom retries webhooks on failure — duplicate deliveries are expected and
   // harmless (zoom_message_id is unique), so only log genuinely new errors.
-  if (error && error.code !== '23505') console.error('zoom-webhook: failed to store inbound message:', error.message);
+  if (error) {
+    if (error.code !== '23505') console.error('zoom-webhook: failed to store inbound message:', error.message);
+    return;
+  }
+
+  // Only draft when we know which lead this is — the framework and reply
+  // both depend on that lead's conversation history and property details.
+  if (!leadId || !inserted) return;
+  try {
+    const draft = await draftReply(sb, ownerUserId, leadId);
+    await sb.from('inbound_messages').update({ draft_reply: draft }).eq('id', inserted.id);
+  } catch (e) {
+    console.error('zoom-webhook: draft generation failed:', e.message);
+    await sb.from('inbound_messages').update({ draft_error: e.message }).eq('id', inserted.id);
+  }
 }
 
 export default async function handler(req, res) {

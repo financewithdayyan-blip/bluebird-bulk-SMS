@@ -1442,7 +1442,7 @@ async function startSend() {
       const fromLabel = zoomNumbers.find(n => n.phone === result.from)?.label;
       addLog('log-sent', `✓  Sent → ${lead.phone}${fromLabel ? ' from ' + fromLabel : ''} · moved to Contacted`);
       dbUpdate(lead.id, { status: 'sent', stage: 'Contacted', sent_from: lead.sent_from, sent_at: lead.sent_at });
-      logSend(lead.phone, lead.sent_from, lead.sent_at);
+      logSend(lead.phone, lead.sent_from, lead.sent_at, lead.id, msg);
     } else {
       lead.status = 'failed'; failed++;
       addLog('log-fail', `✗  Failed → ${lead.phone}: ${result.error||''}`);
@@ -2139,8 +2139,8 @@ async function dbUpdate(id, fields) {
 
 // Persistent, append-only record of every send — kept in its own table so
 // deleting/exporting leads to free up DB space never touches these counts.
-async function logSend(phone, sentFrom, sentAt) {
-  const { error } = await sb.from('send_log').insert({ phone, sent_from: sentFrom, sent_at: sentAt });
+async function logSend(phone, sentFrom, sentAt, leadId, body) {
+  const { error } = await sb.from('send_log').insert({ phone, sent_from: sentFrom, sent_at: sentAt, lead_id: leadId, body });
   if (error) toast('⚠️ Send log write failed: ' + error.message);
 }
 

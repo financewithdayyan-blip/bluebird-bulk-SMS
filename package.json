@@ -5,6 +5,7 @@
     "start": "next start"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.115.0",
     "@supabase/supabase-js": "^2.110.7",
     "@vercel/edge-config": "^1.4.3",
     "next": "^16.2.10",

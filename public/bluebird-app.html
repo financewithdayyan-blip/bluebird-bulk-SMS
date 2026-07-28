@@ -119,7 +119,8 @@ select.field-input option{background:var(--navy-mid)}
 .k-card-phone{font-size:11px;font-family:'Cascadia Code','Courier New',monospace;color:var(--muted);margin-bottom:4px}
 .k-card-addr{font-size:10.5px;color:var(--muted);line-height:1.4}
 .k-card-note{font-size:10.5px;color:var(--teal);line-height:1.45;margin-top:5px;font-style:italic;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.k-card-reply{font-size:10.5px;color:var(--green);line-height:1.45;margin-top:5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.k-card-reply{font-size:10.5px;color:var(--green);line-height:1.45;margin-top:5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
+.k-card-reply:hover{text-decoration:underline}
 .copy-btn{background:none;border:none;cursor:pointer;color:var(--muted);font-size:11px;line-height:1;padding:1px 4px;border-radius:3px;opacity:0;transition:opacity .12s,color .12s,background .12s;vertical-align:middle}
 .k-card:hover .copy-btn{opacity:.75}
 .copy-btn:hover{opacity:1!important;color:var(--brass);background:rgba(26,86,219,.12)}
@@ -684,6 +685,22 @@ select.field-input option{background:var(--navy-mid)}
   </div>
 </div>
 
+<!-- ── SMS REPLY THREAD MODAL ───────────────────────────── -->
+<div class="modal-bg" id="reply-modal">
+  <div class="modal" style="width:520px;max-height:88vh;display:flex;flex-direction:column;">
+    <h2>💬 <span id="reply-lead-name"></span></h2>
+    <div id="reply-lead-sub" style="font-size:11.5px;color:var(--muted);margin:-10px 0 14px;"></div>
+    <div id="reply-thread" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:8px;margin-bottom:14px;max-height:320px;"></div>
+    <div id="reply-draft-error" style="display:none;font-size:11.5px;color:var(--red);background:rgba(220,38,38,.08);border:1px solid rgba(220,38,38,.25);border-radius:6px;padding:8px 10px;margin-bottom:10px;"></div>
+    <div class="section-label" style="margin-bottom:6px;">Reply (AI-drafted — edit before sending)</div>
+    <textarea class="template-area" id="reply-draft-text" style="min-height:80px;" placeholder="No draft yet — write a reply manually, or wait for the AI draft to finish."></textarea>
+    <div style="display:flex;gap:10px;margin-top:12px;justify-content:flex-end;">
+      <button class="btn btn-ghost" onclick="closeReplyThread()">Close</button>
+      <button class="btn btn-brass" id="reply-send-btn" onclick="sendReplyNow()">Send Reply</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── TOAST ──────────────────────────────────────────────── -->
 <div id="toast"></div>
 
@@ -1050,12 +1067,12 @@ function buildCard(l, col) {
     </div>
     <div class="k-card-phone">${esc(l.phone)||'—'}${l.phone ? ` <button class="copy-btn" title="Copy number" onclick="event.stopPropagation();copyLead(${l.id},'phone')">⧉</button>` : ''}</div>
     <div class="k-card-addr">${esc(l.address)}${l.address ? ` <button class="copy-btn" title="Copy address" onclick="event.stopPropagation();copyLead(${l.id},'address')">⧉</button>` : ''}</div>
-    ${latestReplies[l.id] ? `<div class="k-card-reply" title="${esc(latestReplies[l.id])}">💬 ${esc(latestReplies[l.id])}</div>` : ''}
+    ${latestReplies[l.id] ? `<div class="k-card-reply" title="Click to view &amp; reply" onclick="event.stopPropagation();openReplyThread(${l.id})">💬 ${esc(latestReplies[l.id])}</div>` : ''}
     ${latestNotes[l.id] ? `<div class="k-card-note" title="${esc(latestNotes[l.id])}">📝 ${esc(latestNotes[l.id])}</div>` : ''}
     <div class="k-card-footer">
       <span class="k-badge s-badge ${statusCls}"><span class="sb-dot"></span>${statusLabel}</span>
       ${(l.tags||[]).map(t => `<span class="k-lead-tag">${esc(t)}</span>`).join('')}
-      ${replyCounts[l.id] ? `<span class="k-lead-tag" style="border-color:rgba(22,163,74,.4);color:var(--green);" title="Replies from this lead">💬 ${replyCounts[l.id]}</span>` : ''}
+      ${replyCounts[l.id] ? `<span class="k-lead-tag" style="border-color:rgba(22,163,74,.4);color:var(--green);cursor:pointer;" title="Replies from this lead — click to view" onclick="event.stopPropagation();openReplyThread(${l.id})">💬 ${replyCounts[l.id]}</span>` : ''}
       ${!NOTES_DISABLED_COLS.includes(col.id) ? `<span class="k-lead-tag" style="border-color:rgba(8,145,178,.4);color:var(--teal);" title="Click card to open notes">📝 ${noteCounts[l.id] || 0}</span>` : ''}
     </div>
   `;
@@ -2041,6 +2058,80 @@ async function loadInboundMessages() {
   }
   replyCounts = counts;
   latestReplies = latest;
+}
+
+/* ── REPLY THREAD (view conversation, review/edit/send the AI draft) ── */
+let replyModalLeadId = null;
+let replyModalFromPhone = null; // which of our numbers this thread is on — replies must go out from the same one
+
+async function openReplyThread(id) {
+  const l = leads.find(x => x.id === id);
+  if (!l) return;
+  replyModalLeadId = id;
+  replyModalFromPhone = null;
+  document.getElementById('reply-lead-name').textContent = l.name || l.phone || 'Lead';
+  document.getElementById('reply-lead-sub').textContent = [l.phone, l.address].filter(Boolean).join('  ·  ');
+  document.getElementById('reply-thread').innerHTML = '<div style="color:var(--muted);font-size:12px;">Loading…</div>';
+  document.getElementById('reply-draft-error').style.display = 'none';
+  document.getElementById('reply-draft-text').value = '';
+  document.getElementById('reply-modal').classList.add('open');
+
+  const [{ data: inbound, error: inErr }, { data: outbound, error: outErr }] = await Promise.all([
+    sb.from('inbound_messages').select('body, received_at, to_phone, draft_reply, draft_error').eq('lead_id', id).order('received_at'),
+    sb.from('send_log').select('body, sent_at').eq('lead_id', id).not('body', 'is', null).order('sent_at'),
+  ]);
+  if (inErr || outErr) { toast('⚠️ Failed to load conversation: ' + (inErr || outErr).message); return; }
+
+  const thread = [
+    ...(inbound || []).map(m => ({ at: m.received_at, mine: false, body: m.body })),
+    ...(outbound || []).map(m => ({ at: m.sent_at, mine: true, body: m.body })),
+  ].sort((a, b) => new Date(a.at) - new Date(b.at));
+
+  document.getElementById('reply-thread').innerHTML = thread.length
+    ? thread.map(m => `
+        <div style="align-self:${m.mine?'flex-end':'flex-start'};max-width:82%;background:${m.mine?'var(--brass-glow)':'var(--navy-card)'};border-radius:10px;padding:8px 11px;font-size:12.5px;line-height:1.45;">
+          <div style="color:var(--muted);font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px;">${m.mine?'Us':'Them'}</div>
+          ${esc(m.body)}
+        </div>`).join('')
+    : '<div style="color:var(--muted);font-size:12px;">No messages yet.</div>';
+  document.getElementById('reply-thread').style.display = 'flex';
+
+  const latestInbound = (inbound || [])[inbound.length - 1];
+  if (latestInbound) {
+    replyModalFromPhone = latestInbound.to_phone;
+    if (latestInbound.draft_reply) document.getElementById('reply-draft-text').value = latestInbound.draft_reply;
+    if (latestInbound.draft_error) {
+      document.getElementById('reply-draft-error').textContent = '⚠️ AI draft failed: ' + latestInbound.draft_error;
+      document.getElementById('reply-draft-error').style.display = '';
+    }
+  }
+}
+
+function closeReplyThread() {
+  document.getElementById('reply-modal').classList.remove('open');
+  replyModalLeadId = null;
+  replyModalFromPhone = null;
+}
+
+async function sendReplyNow() {
+  const id = replyModalLeadId;
+  const l = leads.find(x => x.id === id);
+  const text = document.getElementById('reply-draft-text').value.trim();
+  if (!l || !text) { toast('⚠️ Write a reply first'); return; }
+
+  const fromKey = zoomNumbers.find(n => n.phone === replyModalFromPhone)?.key || zoomNumbers[0]?.key;
+  if (!fromKey) { toast('⚠️ No Zoom number available to send from'); return; }
+
+  document.getElementById('reply-send-btn').disabled = true;
+  const result = await zoomSend({ phone: l.phone }, text, fromKey);
+  document.getElementById('reply-send-btn').disabled = false;
+
+  if (!result.ok) { toast('⚠️ Send failed: ' + result.error); return; }
+
+  const sentAt = new Date().toISOString();
+  logSend(l.phone, result.from, sentAt, id, text);
+  toast('✅ Reply sent');
+  closeReplyThread();
 }
 
 async function openNotes(id) {

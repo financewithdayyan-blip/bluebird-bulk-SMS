@@ -119,6 +119,7 @@ select.field-input option{background:var(--navy-mid)}
 .k-card-phone{font-size:11px;font-family:'Cascadia Code','Courier New',monospace;color:var(--muted);margin-bottom:4px}
 .k-card-addr{font-size:10.5px;color:var(--muted);line-height:1.4}
 .k-card-note{font-size:10.5px;color:var(--teal);line-height:1.45;margin-top:5px;font-style:italic;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.k-card-reply{font-size:10.5px;color:var(--green);line-height:1.45;margin-top:5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .copy-btn{background:none;border:none;cursor:pointer;color:var(--muted);font-size:11px;line-height:1;padding:1px 4px;border-radius:3px;opacity:0;transition:opacity .12s,color .12s,background .12s;vertical-align:middle}
 .k-card:hover .copy-btn{opacity:.75}
 .copy-btn:hover{opacity:1!important;color:var(--brass);background:rgba(26,86,219,.12)}
@@ -1041,10 +1042,12 @@ function buildCard(l, col) {
     </div>
     <div class="k-card-phone">${esc(l.phone)||'—'}${l.phone ? ` <button class="copy-btn" title="Copy number" onclick="event.stopPropagation();copyLead(${l.id},'phone')">⧉</button>` : ''}</div>
     <div class="k-card-addr">${esc(l.address)}${l.address ? ` <button class="copy-btn" title="Copy address" onclick="event.stopPropagation();copyLead(${l.id},'address')">⧉</button>` : ''}</div>
+    ${latestReplies[l.id] ? `<div class="k-card-reply" title="${esc(latestReplies[l.id])}">💬 ${esc(latestReplies[l.id])}</div>` : ''}
     ${latestNotes[l.id] ? `<div class="k-card-note" title="${esc(latestNotes[l.id])}">📝 ${esc(latestNotes[l.id])}</div>` : ''}
     <div class="k-card-footer">
       <span class="k-badge s-badge ${statusCls}"><span class="sb-dot"></span>${statusLabel}</span>
       ${(l.tags||[]).map(t => `<span class="k-lead-tag">${esc(t)}</span>`).join('')}
+      ${replyCounts[l.id] ? `<span class="k-lead-tag" style="border-color:rgba(22,163,74,.4);color:var(--green);" title="Replies from this lead">💬 ${replyCounts[l.id]}</span>` : ''}
       ${!NOTES_DISABLED_COLS.includes(col.id) ? `<span class="k-lead-tag" style="border-color:rgba(8,145,178,.4);color:var(--teal);" title="Click card to open notes">📝 ${noteCounts[l.id] || 0}</span>` : ''}
     </div>
   `;
@@ -1933,9 +1936,9 @@ async function loadLeads() {
   leads = all.map(r => ({ ...r, selected: false, tags: r.tags || [] }));
   updateNavBadges(); renderKanban(); refreshTagFilterBar();
   renderNumberLimitInputs(); // refresh "used" counts now that sent_from/sent_at are in
-  // Notes load in the background so leads appear immediately; card previews
-  // and note-count badges backfill once they're in.
-  loadNoteCounts().then(renderKanban);
+  // Notes and replies load in the background so leads appear immediately;
+  // card previews and count badges backfill once they're in.
+  Promise.all([loadNoteCounts(), loadInboundMessages()]).then(renderKanban);
 }
 
 /* ── LEAD NOTES (all columns except Cold Call & Contacted) ── */
@@ -1965,6 +1968,34 @@ async function loadNoteCounts() {
   }
   noteCounts = counts;
   latestNotes = latest;
+}
+
+/* ── INBOUND SMS REPLIES (from the Zoom webhook, matched to leads by phone) ── */
+let replyCounts = {};   // lead_id → number of inbound replies
+let latestReplies = {}; // lead_id → most recent reply body (shown on the card)
+
+async function loadInboundMessages() {
+  const page = 1000;
+  const { count, error: countErr } = await sb.from('inbound_messages').select('id', { count: 'exact', head: true });
+  if (countErr) return;
+  const pageCount = Math.max(1, Math.ceil((count || 0) / page));
+  const results = await Promise.all(
+    Array.from({ length: pageCount }, (_, i) =>
+      sb.from('inbound_messages').select('lead_id, body')
+        .not('lead_id', 'is', null)
+        .order('received_at', { ascending: false }).order('id', { ascending: false })
+        .range(i * page, i * page + page - 1))
+  );
+  const counts = {}, latest = {};
+  for (const r of results) {
+    if (r.error) continue;
+    r.data.forEach(m => {
+      counts[m.lead_id] = (counts[m.lead_id] || 0) + 1;
+      if (latest[m.lead_id] === undefined) latest[m.lead_id] = m.body;
+    });
+  }
+  replyCounts = counts;
+  latestReplies = latest;
 }
 
 async function openNotes(id) {

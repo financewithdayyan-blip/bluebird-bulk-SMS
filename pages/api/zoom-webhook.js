@@ -75,6 +75,16 @@ async function draftReply(sb, ownerUserId, leadId) {
   return text;
 }
 
+// Standard carrier-recognized opt-out keywords (STOP, UNSUBSCRIBE, etc.) —
+// matched on the whole trimmed message only, never as a substring, so a
+// real sentence that happens to contain "stop" ("I want to stop looking")
+// never gets misread as an opt-out.
+const OPT_OUT_KEYWORDS = new Set(['stop', 'stopall', 'unsubscribe', 'cancel', 'end', 'quit']);
+function isOptOutMessage(text) {
+  const cleaned = String(text || '').trim().toLowerCase().replace(/[.!?,;:]+$/, '');
+  return OPT_OUT_KEYWORDS.has(cleaned);
+}
+
 async function handleSmsReceived(sb, body) {
   const obj = body.payload?.object;
   if (!obj) return;
@@ -106,9 +116,18 @@ async function handleSmsReceived(sb, body) {
     return;
   }
 
+  if (!leadId || !inserted) return;
+
+  // Opt-out is a hard compliance action — do it deterministically here rather
+  // than trusting the AI draft to also flag it. Runs regardless of whether
+  // drafting below succeeds.
+  if (isOptOutMessage(obj.message)) {
+    const { error: optErr } = await sb.from('leads').update({ opted_out: true, stage: 'Dead' }).eq('id', leadId);
+    if (optErr) console.error('zoom-webhook: failed to move opted-out lead to Dead:', optErr.message);
+  }
+
   // Only draft when we know which lead this is — the framework and reply
   // both depend on that lead's conversation history and property details.
-  if (!leadId || !inserted) return;
   try {
     const draft = await draftReply(sb, ownerUserId, leadId);
     await sb.from('inbound_messages').update({ draft_reply: draft }).eq('id', inserted.id);

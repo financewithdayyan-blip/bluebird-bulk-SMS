@@ -1556,10 +1556,11 @@ function renderNumberLimitInputs() {
         <input type="number" class="field-input" style="width:90px;" min="1" max="1000"
           value="${numberLimits[n.key] || 1000}" onchange="saveNumberLimit('${n.key}', this.value)" />
         <span>msgs / 24h · Zoom cap is 1000</span>
-        <span style="color:var(--muted);">— used: <strong style="color:var(--white);">${countSentLast24h(n.phone)}</strong></span>
+        <span style="color:var(--muted);">— used in last 24h: <strong style="color:var(--white);">${countSentLast24h(n.phone)}</strong></span>
       </div>
     `).join('') +
-    (zoomNumbers.length > 1 ? '<p class="field-desc" style="margin-top:2px;">When a number hits its limit mid-send, the app automatically switches to the other one and logs the switch.</p>' : '');
+    '<p class="field-desc" style="margin-top:2px;">This is a rolling daily limit, not a one-time cap: each message only counts against it for 24 hours after it\'s sent, then automatically rolls off — it resets on its own, no manual action needed.' +
+    (zoomNumbers.length > 1 ? ' When a number hits its limit mid-send, the app automatically switches to the other one and logs the switch.' : '') + '</p>';
 }
 
 async function saveNumberLimit(key, value) {

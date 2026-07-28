@@ -541,6 +541,14 @@ select.field-input option{background:var(--navy-mid)}
     </div>
   </div>
 
+  <!-- AI Reply Framework -->
+  <div class="settings-card">
+    <h3>🤖 AI Reply Framework</h3>
+    <p class="field-desc" style="margin-bottom:12px;">The script the AI will follow when drafting replies to incoming texts — qualification questions, and how to respond to positive/negative/DNC replies. Edit freely; nothing auto-sends yet.</p>
+    <textarea class="template-area" id="ai-framework-text" style="min-height:280px;"></textarea>
+    <div class="save-row"><button class="btn btn-brass" onclick="saveAiFramework()">Save Framework</button></div>
+  </div>
+
   <!-- Quick-Add Tags -->
   <div class="settings-card">
     <h3>🏷 Quick-Add Tags</h3>
@@ -1757,6 +1765,43 @@ async function loadPresetTags() {
   renderSettingsTagList();
 }
 
+const DEFAULT_AI_FRAMEWORK = `When a lead responds positively to the cold outreach — e.g. "make me an offer", "I want to sell it", or gives a number like "300k" — reply first with something like:
+"That's great! Before I can put an offer together, I just need to ask a few quick questions."
+Then ask the following, one question at a time, waiting for their answer before moving to the next:
+
+1. Confirm they are the current owner of the property.
+2. Ask about their motivation for selling.
+3. Ask about the property's condition — specifically the roof, foundation, HVAC, electrical, plumbing, and any cosmetic/rehab needs.
+4. Ask their asking price.
+5. Ask their timeline for selling.
+6. Ask them to send a few photos of the property so it can be evaluated.
+
+If a lead responds negatively / not interested, reply:
+"Sorry to bother you — I won't reach out again."
+Do not contact this lead again.
+
+If a lead asks to be put on the Do Not Call list, reply:
+"Happy to do that — sorry to have bothered you, you won't hear from us again."
+Do not contact this lead again.`;
+
+async function loadAiFramework() {
+  const { data, error } = await sb.from('ai_reply_config').select('framework_text').maybeSingle();
+  if (error) return;
+  const text = data?.framework_text || DEFAULT_AI_FRAMEWORK;
+  const el = document.getElementById('ai-framework-text');
+  if (el) el.value = text;
+  if (!data) {
+    await sb.from('ai_reply_config').upsert({ framework_text: DEFAULT_AI_FRAMEWORK }, { onConflict: 'user_id' });
+  }
+}
+
+async function saveAiFramework() {
+  const text = document.getElementById('ai-framework-text').value;
+  const { error } = await sb.from('ai_reply_config').upsert({ framework_text: text }, { onConflict: 'user_id' });
+  if (error) { toast('⚠️ Failed to save framework: ' + error.message); return; }
+  toast('✅ AI reply framework saved');
+}
+
 function renderTagPresetButtons() {
   const empty = document.getElementById('tag-presets-empty');
   const existing = document.querySelectorAll('#tag-presets .preset-tag-btn');
@@ -1909,7 +1954,7 @@ function applySession(session) {
   document.getElementById('signout-btn').style.display = session ? '' : 'none';
   if (session) {
     document.getElementById('nav-user-email').textContent = session.user.email;
-    if (session.user.id !== prevUserId) { loadLeads(); loadTemplates(); loadPresetTags(); loadZoomNumbers(); loadNumberLimits(); loadSendLog(); }
+    if (session.user.id !== prevUserId) { loadLeads(); loadTemplates(); loadPresetTags(); loadZoomNumbers(); loadNumberLimits(); loadSendLog(); loadAiFramework(); }
   } else if (prevUserId) {
     leads = [];
     renderKanban(); updateNavBadges(); refreshTagFilterBar();

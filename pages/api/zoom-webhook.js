@@ -47,14 +47,19 @@ function toE164(raw) {
 }
 
 async function draftReply(sb, ownerUserId, leadId) {
-  const [{ data: lead }, { data: config }, { data: inbound }, { data: outbound }] = await Promise.all([
-    sb.from('leads').select('name, address').eq('id', leadId).maybeSingle(),
-    sb.from('ai_reply_config').select('framework_text').eq('user_id', ownerUserId).maybeSingle(),
+  const [{ data: lead }, { data: configRows }, { data: inbound }, { data: outbound }] = await Promise.all([
+    sb.from('leads').select('name, address, tags').eq('id', leadId).maybeSingle(),
+    sb.from('ai_reply_config').select('tag, framework_text').eq('user_id', ownerUserId),
     sb.from('inbound_messages').select('body, received_at').eq('lead_id', leadId).order('received_at'),
     sb.from('send_log').select('body, sent_at').eq('lead_id', leadId).not('body', 'is', null).order('sent_at'),
   ]);
 
-  const framework = config?.framework_text;
+  // Each lead type (Code Violation, Pre-Foreclosure, Tax Delinquent, ...) can
+  // have its own framework, since the right opening move differs by tag —
+  // use the first of the lead's tags that has a saved framework, else Default.
+  const frameworksByTag = Object.fromEntries((configRows || []).map((r) => [r.tag, r.framework_text]));
+  const matchedTag = (lead?.tags || []).find((t) => frameworksByTag[t]);
+  const framework = matchedTag ? frameworksByTag[matchedTag] : frameworksByTag['Default'];
   if (!framework) throw new Error('No AI reply framework saved in Settings yet');
 
   const transcript = [

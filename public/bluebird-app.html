@@ -545,9 +545,13 @@ select.field-input option{background:var(--navy-mid)}
   <!-- AI Reply Framework -->
   <div class="settings-card">
     <h3>🤖 AI Reply Framework</h3>
-    <p class="field-desc" style="margin-bottom:12px;">The script the AI will follow when drafting replies to incoming texts — qualification questions, and how to respond to positive/negative/DNC replies. Edit freely; nothing auto-sends yet.</p>
+    <p class="field-desc" style="margin-bottom:12px;">The script the AI follows when drafting replies. Each lead's tag (Code Violation, Pre-Foreclosure, etc.) gets its own framework — a lead uses its tag's framework if one is saved, otherwise falls back to "Default". Edit freely; nothing auto-sends without your review.</p>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
+      <select class="field-input" id="ai-framework-tag" style="width:auto;min-width:180px;" onchange="loadAiFrameworkForTag()"></select>
+      <span id="ai-framework-status" style="font-size:11.5px;color:var(--muted);"></span>
+    </div>
     <textarea class="template-area" id="ai-framework-text" style="min-height:280px;"></textarea>
-    <div class="save-row"><button class="btn btn-brass" onclick="saveAiFramework()">Save Framework</button></div>
+    <div class="save-row"><button class="btn btn-brass" onclick="saveAiFrameworkForTag()">Save Framework for this tag</button></div>
   </div>
 
   <!-- Quick-Add Tags -->
@@ -1801,22 +1805,58 @@ If a lead asks to be put on the Do Not Call list, reply:
 "Happy to do that — sorry to have bothered you, you won't hear from us again."
 Do not contact this lead again.`;
 
-async function loadAiFramework() {
-  const { data, error } = await sb.from('ai_reply_config').select('framework_text').maybeSingle();
+let aiFrameworks = {}; // tag → framework_text ('Default' is the fallback)
+
+async function loadAiFrameworks() {
+  const { data, error } = await sb.from('ai_reply_config').select('tag, framework_text');
   if (error) return;
-  const text = data?.framework_text || DEFAULT_AI_FRAMEWORK;
-  const el = document.getElementById('ai-framework-text');
-  if (el) el.value = text;
-  if (!data) {
-    await sb.from('ai_reply_config').upsert({ framework_text: DEFAULT_AI_FRAMEWORK }, { onConflict: 'user_id' });
+  aiFrameworks = Object.fromEntries((data || []).map(r => [r.tag, r.framework_text]));
+  if (aiFrameworks['Default'] === undefined) {
+    aiFrameworks['Default'] = DEFAULT_AI_FRAMEWORK;
+    await sb.from('ai_reply_config').upsert({ tag: 'Default', framework_text: DEFAULT_AI_FRAMEWORK }, { onConflict: 'user_id,tag' });
+  }
+  refreshAiFrameworkTagSelect();
+  loadAiFrameworkForTag();
+}
+
+function refreshAiFrameworkTagSelect() {
+  const sel = document.getElementById('ai-framework-tag');
+  if (!sel) return;
+  const current = sel.value;
+  const tags = [...new Set([
+    'Default',
+    ...leads.flatMap(l => l.tags || []),
+    ...Object.keys(aiFrameworks),
+  ])].sort((a, b) => a === 'Default' ? -1 : b === 'Default' ? 1 : a.localeCompare(b));
+  sel.innerHTML = tags.map(t =>
+    `<option value="${esc(t)}">${esc(t)}${aiFrameworks[t] !== undefined ? ' ✓' : ''}</option>`
+  ).join('');
+  if (tags.includes(current)) sel.value = current;
+}
+
+function loadAiFrameworkForTag() {
+  const tag = document.getElementById('ai-framework-tag').value;
+  const status = document.getElementById('ai-framework-status');
+  if (aiFrameworks[tag] !== undefined) {
+    document.getElementById('ai-framework-text').value = aiFrameworks[tag];
+    status.textContent = tag === 'Default'
+      ? 'Fallback used for any lead whose tags don\'t have their own saved framework.'
+      : `Loaded the "${tag}"-specific framework.`;
+  } else {
+    document.getElementById('ai-framework-text').value = '';
+    status.textContent = `No framework saved for "${tag}" yet — leads with this tag use "Default" until you write and save one.`;
   }
 }
 
-async function saveAiFramework() {
+async function saveAiFrameworkForTag() {
+  const tag = document.getElementById('ai-framework-tag').value;
   const text = document.getElementById('ai-framework-text').value;
-  const { error } = await sb.from('ai_reply_config').upsert({ framework_text: text }, { onConflict: 'user_id' });
+  if (!tag) { toast('Pick a tag first.'); return; }
+  const { error } = await sb.from('ai_reply_config').upsert({ tag, framework_text: text }, { onConflict: 'user_id,tag' });
   if (error) { toast('⚠️ Failed to save framework: ' + error.message); return; }
-  toast('✅ AI reply framework saved');
+  aiFrameworks[tag] = text;
+  refreshAiFrameworkTagSelect();
+  toast(`✅ AI reply framework saved for "${tag}"`);
 }
 
 function renderTagPresetButtons() {
@@ -1920,6 +1960,7 @@ document.addEventListener('DOMContentLoaded', () => {});
 ═══════════════════════════════════════════════════ */
 function refreshTagFilterBar() {
   refreshTemplateSelect();
+  refreshAiFrameworkTagSelect();
   const allTags = [...new Set(leads.flatMap(l => l.tags || []))].sort();
   const bar = document.getElementById('tag-filter-bar');
   const chips = document.getElementById('tag-filter-chips');
@@ -1971,7 +2012,7 @@ function applySession(session) {
   document.getElementById('signout-btn').style.display = session ? '' : 'none';
   if (session) {
     document.getElementById('nav-user-email').textContent = session.user.email;
-    if (session.user.id !== prevUserId) { loadLeads(); loadTemplates(); loadPresetTags(); loadZoomNumbers(); loadNumberLimits(); loadSendLog(); loadAiFramework(); }
+    if (session.user.id !== prevUserId) { loadLeads(); loadTemplates(); loadPresetTags(); loadZoomNumbers(); loadNumberLimits(); loadSendLog(); loadAiFrameworks(); }
   } else if (prevUserId) {
     leads = [];
     renderKanban(); updateNavBadges(); refreshTagFilterBar();

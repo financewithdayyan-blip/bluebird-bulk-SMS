@@ -33,7 +33,7 @@ const DRAFT_MODEL = 'claude-haiku-4-5';
 // A reply that lands the instant a text comes in reads as an obvious bot.
 // This holds the auto-reply for a few seconds before sending so it feels
 // like someone actually read and typed it.
-const REPLY_DELAY_MS = 4000;
+const REPLY_DELAY_MS = 8000;
 
 export const config = { api: { bodyParser: false } };
 export const maxDuration = 30; // Anthropic call + this delay + the Zoom send can exceed the default timeout

@@ -154,7 +154,7 @@ async function handleSmsReceived(sb, body) {
   }
   if (!leadId || !inserted) return;
 
-  const { data: lead } = await sb.from('leads').select('ai_reply_paused').eq('id', leadId).maybeSingle();
+  const { data: lead } = await sb.from('leads').select('ai_reply_paused, stage').eq('id', leadId).maybeSingle();
   if (!lead) return;
 
   // Opt-out is a hard compliance action — do it deterministically here rather
@@ -170,6 +170,13 @@ async function handleSmsReceived(sb, body) {
   // over -- stop auto-replying. A STOP/DNC courtesy close still goes out
   // even if the lead was already paused for some other reason.
   if (lead.ai_reply_paused && !optOut) return;
+
+  // Any reply mid-qualification surfaces the lead in the Replied column —
+  // this gets upgraded to Interested below if this exact message also
+  // completes qualification.
+  if (!optOut && lead.stage !== 'Replied') {
+    await sb.from('leads').update({ stage: 'Replied' }).eq('id', leadId);
+  }
 
   const numberConfig = toPhone && getNumberConfigs().find((n) => n.phone === toPhone);
   if (!numberConfig) {

@@ -132,6 +132,27 @@ function isOptOutMessage(text) {
   return OPT_OUT_KEYWORDS.has(cleaned);
 }
 
+// Plain-English "don't contact me" requests. Anchored to the end of the
+// message (allowing only a few trailing softener words) rather than matched
+// anywhere -- "don't call me before 9am" or "remove my number, use this one
+// instead" must NOT match, since a false positive here silently drops a live
+// lead with zero reply. A phrase this strict misses shouldn't be caught
+// deterministically anyway -- the AI's negativeReply classification (which
+// still sends a courtesy reply) is the fallback for anything softer or less
+// literal than these.
+const DNC_TRAIL = String.raw`(?:\s+(?:again|anymore|please|thanks?|thank\s+you|from\s+(?:your|the|this)\s+(?:list|database|records)))*[\s.!]*$`;
+const DNC_PHRASE_PATTERNS = [
+  new RegExp(String.raw`\b(?:don'?t|do\s+not)\s+(?:text|contact|message|msg|call|email)\s+me` + DNC_TRAIL, 'i'),
+  new RegExp(String.raw`\bstop\s+(?:texting|contacting|messaging|calling|emailing)\s+me` + DNC_TRAIL, 'i'),
+  new RegExp(String.raw`\b(?:please\s+)?remove\s+(?:me|my\s+number)` + DNC_TRAIL, 'i'),
+  new RegExp(String.raw`\btake\s+me\s+off\s+(?:your|the)\s+list` + DNC_TRAIL, 'i'),
+  new RegExp(String.raw`\blose\s+my\s+number` + DNC_TRAIL, 'i'),
+  new RegExp(String.raw`\bnever\s+(?:text|contact|message|call)\s+me\s+again` + DNC_TRAIL, 'i'),
+];
+function isDncPhrase(text) {
+  return DNC_PHRASE_PATTERNS.some((re) => re.test(String(text || '').trim()));
+}
+
 async function handleSmsReceived(sb, body) {
   const obj = body.payload?.object;
   if (!obj) return;
@@ -170,24 +191,25 @@ async function handleSmsReceived(sb, body) {
   const { data: lead } = await sb.from('leads').select('ai_reply_paused, stage').eq('id', leadId).maybeSingle();
   if (!lead) return;
 
-  // Opt-out is a hard compliance action — do it deterministically here rather
-  // than trusting the AI to also flag it, and it always pauses future
-  // auto-replies regardless of qualification progress.
-  const optOut = isOptOutMessage(obj.message);
+  // Opt-out (carrier keyword OR a plain-English "don't contact me" request)
+  // is a hard compliance action — detect it deterministically rather than
+  // spending an AI call on it, and skip sending anything back entirely: no
+  // courtesy reply, no Anthropic cost, just a silent move to Dead.
+  const optOut = isOptOutMessage(obj.message) || isDncPhrase(obj.message);
   if (optOut) {
     const { error: optErr } = await sb.from('leads').update({ opted_out: true, stage: 'Dead', ai_reply_paused: true }).eq('id', leadId);
     if (optErr) console.error('zoom-webhook: failed to move opted-out lead to Dead:', optErr.message);
+    return;
   }
 
   // Once paused (fully qualified, or already handled), a human has taken
-  // over -- stop auto-replying. A STOP/DNC courtesy close still goes out
-  // even if the lead was already paused for some other reason.
-  if (lead.ai_reply_paused && !optOut) return;
+  // over -- stop auto-replying.
+  if (lead.ai_reply_paused) return;
 
   // Any reply mid-qualification surfaces the lead in the Replied column —
   // this gets upgraded to Interested below if this exact message also
   // completes qualification.
-  if (!optOut && lead.stage !== 'Replied') {
+  if (lead.stage !== 'Replied') {
     await sb.from('leads').update({ stage: 'Replied' }).eq('id', leadId);
   }
 
@@ -209,12 +231,13 @@ async function handleSmsReceived(sb, body) {
       sent_at: new Date().toISOString(), lead_id: leadId, body: draft.reply,
     });
 
-    if (!optOut && draft.negativeReply) {
-      // A declined lead follows the same "never bother them again" promise as
-      // opt-out, so it's excluded from future bulk sends the same way, not
-      // just paused for auto-reply.
+    if (draft.negativeReply) {
+      // A softer decline the deterministic phrase check didn't catch (e.g.
+      // "not interested" with no explicit "don't contact me") still gets a
+      // brief courtesy reply, then follows the same "never bother them
+      // again" promise as opt-out -- excluded from future bulk sends too.
       await sb.from('leads').update({ ai_reply_paused: true, stage: 'Dead', opted_out: true }).eq('id', leadId);
-    } else if (!optOut && draft.fullyQualified) {
+    } else if (draft.fullyQualified) {
       await sb.from('leads').update({ ai_reply_paused: true, stage: 'Interested' }).eq('id', leadId);
     }
   } catch (e) {

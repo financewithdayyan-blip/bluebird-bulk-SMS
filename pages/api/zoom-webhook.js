@@ -30,7 +30,13 @@ import { getNumberConfigs, sendZoomSms } from '../../lib/zoom';
 // more capable model here if replies need more nuance than Haiku gives.
 const DRAFT_MODEL = 'claude-haiku-4-5';
 
+// A reply that lands the instant a text comes in reads as an obvious bot.
+// This holds the auto-reply for a few seconds before sending so it feels
+// like someone actually read and typed it.
+const REPLY_DELAY_MS = 4000;
+
 export const config = { api: { bodyParser: false } };
+export const maxDuration = 30; // Anthropic call + this delay + the Zoom send can exceed the default timeout
 
 function readRawBody(req) {
   return new Promise((resolve, reject) => {
@@ -186,6 +192,7 @@ async function handleSmsReceived(sb, body) {
 
   try {
     const draft = await draftReply(sb, ownerUserId, leadId, hasAttachmentsNow);
+    await new Promise((resolve) => setTimeout(resolve, REPLY_DELAY_MS));
     const sendResult = await sendZoomSms({ numberConfig, to: fromPhone, message: draft.reply });
     if (!sendResult.ok) throw new Error(sendResult.error);
 

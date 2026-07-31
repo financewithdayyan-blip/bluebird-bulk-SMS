@@ -6,7 +6,10 @@
 // immediately (no human review) — this only covers the qualification
 // conversation itself; once a lead is fully qualified (or opts out), the
 // lead is flagged and auto-replying stops so a human takes over to make the
-// actual offer.
+// actual offer. Leads are also auto-routed across the Kanban board: any
+// reply lands in Replied, a declined/negative reply or opt-out moves to
+// Dead (and is excluded from future bulk sends), and a fully qualified lead
+// moves to Interested.
 //
 // Required env vars:
 //   ZOOM_WEBHOOK_SECRET_TOKEN — shown by Zoom when you add an Event
@@ -101,8 +104,12 @@ async function draftReply(sb, ownerUserId, leadId, hasAttachmentsNow) {
             type: 'boolean',
             description: 'True only if the lead has confirmed ownership, given their motivation, described the property condition, given an asking price, given a timeline, AND photos have already been received (see "Photos received so far" above). False otherwise -- including while this reply is still asking for missing information, or if the lead declined/opted out.',
           },
+          negative_reply: {
+            type: 'boolean',
+            description: 'True only if the lead is clearly declining / not interested in selling and this reply follows the framework\'s negative-reply script (e.g. "sorry, never going to bother you again"). Do not set this for a formal STOP/DNC request (that\'s handled separately) -- just for someone saying no / not interested. False for anything else, including neutral, cautious, or mid-qualification answers.',
+          },
         },
-        required: ['reply', 'fully_qualified'],
+        required: ['reply', 'fully_qualified', 'negative_reply'],
       },
     }],
     tool_choice: { type: 'tool', name: 'submit_reply' },
@@ -110,9 +117,9 @@ async function draftReply(sb, ownerUserId, leadId, hasAttachmentsNow) {
 
   const toolUse = response.content.find((b) => b.type === 'tool_use');
   if (!toolUse) throw new Error('Model returned no structured reply');
-  const { reply, fully_qualified } = toolUse.input || {};
+  const { reply, fully_qualified, negative_reply } = toolUse.input || {};
   if (!reply) throw new Error('Model returned an empty reply');
-  return { reply: String(reply).trim(), fullyQualified: !!fully_qualified };
+  return { reply: String(reply).trim(), fullyQualified: !!fully_qualified, negativeReply: !!negative_reply };
 }
 
 // Standard carrier-recognized opt-out keywords (STOP, UNSUBSCRIBE, etc.) —
@@ -202,7 +209,12 @@ async function handleSmsReceived(sb, body) {
       sent_at: new Date().toISOString(), lead_id: leadId, body: draft.reply,
     });
 
-    if (!optOut && draft.fullyQualified) {
+    if (!optOut && draft.negativeReply) {
+      // A declined lead follows the same "never bother them again" promise as
+      // opt-out, so it's excluded from future bulk sends the same way, not
+      // just paused for auto-reply.
+      await sb.from('leads').update({ ai_reply_paused: true, stage: 'Dead', opted_out: true }).eq('id', leadId);
+    } else if (!optOut && draft.fullyQualified) {
       await sb.from('leads').update({ ai_reply_paused: true, stage: 'Interested' }).eq('id', leadId);
     }
   } catch (e) {

@@ -693,11 +693,12 @@ select.field-input option{background:var(--navy-mid)}
 <div class="modal-bg" id="reply-modal">
   <div class="modal" style="width:520px;max-height:88vh;display:flex;flex-direction:column;">
     <h2>💬 <span id="reply-lead-name"></span></h2>
-    <div id="reply-lead-sub" style="font-size:11.5px;color:var(--muted);margin:-10px 0 14px;"></div>
+    <div id="reply-lead-sub" style="font-size:11.5px;color:var(--muted);margin:-10px 0 8px;"></div>
+    <div id="reply-ai-status" style="font-size:11px;font-weight:700;margin-bottom:10px;"></div>
     <div id="reply-thread" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:8px;margin-bottom:14px;max-height:320px;"></div>
     <div id="reply-draft-error" style="display:none;font-size:11.5px;color:var(--red);background:rgba(220,38,38,.08);border:1px solid rgba(220,38,38,.25);border-radius:6px;padding:8px 10px;margin-bottom:10px;"></div>
-    <div class="section-label" style="margin-bottom:6px;">Reply (AI-drafted — edit before sending)</div>
-    <textarea class="template-area" id="reply-draft-text" style="min-height:80px;" placeholder="No draft yet — write a reply manually, or wait for the AI draft to finish."></textarea>
+    <div class="section-label" style="margin-bottom:6px;">Manual reply</div>
+    <textarea class="template-area" id="reply-draft-text" style="min-height:80px;" placeholder="Write a reply manually…"></textarea>
     <div style="display:flex;gap:10px;margin-top:12px;justify-content:flex-end;">
       <button class="btn btn-ghost" onclick="closeReplyThread()">Close</button>
       <button class="btn btn-brass" id="reply-send-btn" onclick="sendReplyNow()">Send Reply</button>
@@ -2112,6 +2113,11 @@ async function openReplyThread(id) {
   replyModalFromPhone = null;
   document.getElementById('reply-lead-name').textContent = l.name || l.phone || 'Lead';
   document.getElementById('reply-lead-sub').textContent = [l.phone, l.address].filter(Boolean).join('  ·  ');
+  const statusEl = document.getElementById('reply-ai-status');
+  statusEl.textContent = l.ai_reply_paused
+    ? '✋ Paused — AI has stopped replying to this lead. Reply manually below.'
+    : '🤖 AI is auto-replying to this lead following its framework — replies send immediately, no review needed.';
+  statusEl.style.color = l.ai_reply_paused ? 'var(--amber)' : 'var(--green)';
   document.getElementById('reply-thread').innerHTML = '<div style="color:var(--muted);font-size:12px;">Loading…</div>';
   document.getElementById('reply-draft-error').style.display = 'none';
   document.getElementById('reply-draft-text').value = '';
@@ -2140,10 +2146,13 @@ async function openReplyThread(id) {
   const latestInbound = (inbound || [])[inbound.length - 1];
   if (latestInbound) {
     replyModalFromPhone = latestInbound.to_phone;
-    if (latestInbound.draft_reply) document.getElementById('reply-draft-text').value = latestInbound.draft_reply;
+    // A successful auto-reply already shows up as an "Us" bubble in the
+    // thread above — only surface the draft here when it failed to send,
+    // since that's the one case needing a manual retry.
     if (latestInbound.draft_error) {
-      document.getElementById('reply-draft-error').textContent = '⚠️ AI draft failed: ' + latestInbound.draft_error;
+      document.getElementById('reply-draft-error').textContent = '⚠️ Auto-reply failed to send: ' + latestInbound.draft_error;
       document.getElementById('reply-draft-error').style.display = '';
+      if (latestInbound.draft_reply) document.getElementById('reply-draft-text').value = latestInbound.draft_reply;
     }
   }
 }
@@ -2171,6 +2180,12 @@ async function sendReplyNow() {
 
   const sentAt = new Date().toISOString();
   logSend(l.phone, result.from, sentAt, id, text);
+  // A manual reply means a human has taken over this conversation — stop the
+  // AI from auto-replying too, so the two don't talk over each other.
+  if (!l.ai_reply_paused) {
+    l.ai_reply_paused = true;
+    dbUpdate(id, { ai_reply_paused: true });
+  }
   toast('✅ Reply sent');
   closeReplyThread();
 }

@@ -1,8 +1,12 @@
-// Receives Zoom webhook events (starting with incoming SMS) so the app can
-// auto-draft replies. Verifies the request is really from Zoom, logs the raw
-// event to `webhook_log`, and — for phone.sms_received — stores a parsed row
-// in `inbound_messages` matched to a lead by phone number, then (when a lead
-// matched) asks Claude to draft a reply following the saved framework.
+// Receives Zoom webhook events for incoming SMS and auto-replies to qualify
+// leads. Verifies the request is really from Zoom, logs the raw event to
+// `webhook_log`, and — for phone.sms_received — stores a parsed row in
+// `inbound_messages` matched to a lead by phone number. When a lead matches,
+// Claude drafts the next reply per that lead's saved framework and it's sent
+// immediately (no human review) — this only covers the qualification
+// conversation itself; once a lead is fully qualified (or opts out), the
+// lead is flagged and auto-replying stops so a human takes over to make the
+// actual offer.
 //
 // Required env vars:
 //   ZOOM_WEBHOOK_SECRET_TOKEN — shown by Zoom when you add an Event
@@ -18,11 +22,12 @@
 import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 import Anthropic from '@anthropic-ai/sdk';
+import { getNumberConfigs, sendZoomSms } from '../../lib/zoom';
 
-// Cheap, fast model — a drafted SMS reply is a small, low-stakes generation
-// (a human reviews and approves before anything sends), so this isn't worth
-// spending Opus-tier tokens on. Swap to a more capable model here if the
-// drafts need more nuance than Haiku gives.
+// Cheap, fast model — each reply is a small, bounded, script-following
+// generation (the framework already spells out what to say), not open-ended
+// reasoning, so this isn't worth spending Opus-tier tokens on. Swap to a
+// more capable model here if replies need more nuance than Haiku gives.
 const DRAFT_MODEL = 'claude-haiku-4-5';
 
 export const config = { api: { bodyParser: false } };
@@ -46,11 +51,15 @@ function toE164(raw) {
   return '+' + digits;
 }
 
-async function draftReply(sb, ownerUserId, leadId) {
+// Drafts the next reply and reports whether the lead has now answered every
+// qualification question. Photos are tracked deterministically (see
+// has_attachments) rather than left for the model to infer from text alone,
+// so that fact is handed to it as ground truth instead of asked to guess.
+async function draftReply(sb, ownerUserId, leadId, hasAttachmentsNow) {
   const [{ data: lead }, { data: configRows }, { data: inbound }, { data: outbound }] = await Promise.all([
     sb.from('leads').select('name, address, tags').eq('id', leadId).maybeSingle(),
     sb.from('ai_reply_config').select('tag, framework_text').eq('user_id', ownerUserId),
-    sb.from('inbound_messages').select('body, received_at').eq('lead_id', leadId).order('received_at'),
+    sb.from('inbound_messages').select('body, received_at, has_attachments').eq('lead_id', leadId).order('received_at'),
     sb.from('send_log').select('body, sent_at').eq('lead_id', leadId).not('body', 'is', null).order('sent_at'),
   ]);
 
@@ -62,6 +71,8 @@ async function draftReply(sb, ownerUserId, leadId) {
   const framework = matchedTag ? frameworksByTag[matchedTag] : frameworksByTag['Default'];
   if (!framework) throw new Error('No AI reply framework saved in Settings yet');
 
+  const hasImages = hasAttachmentsNow || (inbound || []).some((m) => m.has_attachments);
+
   const transcript = [
     ...(inbound || []).map((m) => ({ at: m.received_at, line: `[Them]: ${m.body}` })),
     ...(outbound || []).map((m) => ({ at: m.sent_at, line: `[Us]: ${m.body}` })),
@@ -71,13 +82,31 @@ async function draftReply(sb, ownerUserId, leadId) {
   const response = await anthropic.messages.create({
     model: DRAFT_MODEL,
     max_tokens: 300,
-    system: `You are Dayyan from Bluebird Acquisitions, texting a property owner who replied to a cold outreach SMS about buying their property for cash. Draft only the next text message to send them — 1 to 3 short sentences, sounding like a real person texting, not corporate. No greeting like "Dear", no signature. Follow these rules for what to say:\n\n${framework}\n\nProperty address: ${lead?.address || 'unknown'}\nOwner's name on file: ${lead?.name || 'unknown'}\n\nReply with ONLY the SMS text to send — no quotation marks, no explanation, no labels.`,
-    messages: [{ role: 'user', content: `Conversation so far (oldest to newest):\n${transcript}\n\nDraft the next reply from us.` }],
+    system: `You are Dayyan from Bluebird Acquisitions, texting a property owner who replied to a cold outreach SMS about buying their property for cash. Draft the next text message to send them — 1 to 3 short sentences, sounding like a real person texting, not corporate. No greeting like "Dear", no signature. Follow these rules for what to say:\n\n${framework}\n\nProperty address: ${lead?.address || 'unknown'}\nOwner's name on file: ${lead?.name || 'unknown'}\nPhotos received so far: ${hasImages ? 'yes' : 'no'}`,
+    messages: [{ role: 'user', content: `Conversation so far (oldest to newest):\n${transcript}\n\nDraft the next reply from us, and report whether this lead is now fully qualified.` }],
+    tools: [{
+      name: 'submit_reply',
+      description: 'Submit the next SMS reply to send, and whether the lead has now fully completed the qualification framework.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          reply: { type: 'string', description: 'The exact SMS text to send next.' },
+          fully_qualified: {
+            type: 'boolean',
+            description: 'True only if the lead has confirmed ownership, given their motivation, described the property condition, given an asking price, given a timeline, AND photos have already been received (see "Photos received so far" above). False otherwise -- including while this reply is still asking for missing information, or if the lead declined/opted out.',
+          },
+        },
+        required: ['reply', 'fully_qualified'],
+      },
+    }],
+    tool_choice: { type: 'tool', name: 'submit_reply' },
   });
 
-  const text = response.content.find((b) => b.type === 'text')?.text?.trim();
-  if (!text) throw new Error('Model returned no text');
-  return text;
+  const toolUse = response.content.find((b) => b.type === 'tool_use');
+  if (!toolUse) throw new Error('Model returned no structured reply');
+  const { reply, fully_qualified } = toolUse.input || {};
+  if (!reply) throw new Error('Model returned an empty reply');
+  return { reply: String(reply).trim(), fullyQualified: !!fully_qualified };
 }
 
 // Standard carrier-recognized opt-out keywords (STOP, UNSUBSCRIBE, etc.) —
@@ -105,6 +134,8 @@ async function handleSmsReceived(sb, body) {
     leadId = lead?.id || null;
   }
 
+  const hasAttachmentsNow = Array.isArray(obj.attachments) && obj.attachments.length > 0;
+
   const { data: inserted, error } = await sb.from('inbound_messages').insert({
     user_id: ownerUserId,
     lead_id: leadId,
@@ -113,6 +144,7 @@ async function handleSmsReceived(sb, body) {
     body: obj.message || '',
     zoom_message_id: obj.message_id || null,
     received_at: obj.date_time || new Date().toISOString(),
+    has_attachments: hasAttachmentsNow,
   }).select('id').maybeSingle();
   // Zoom retries webhooks on failure — duplicate deliveries are expected and
   // harmless (zoom_message_id is unique), so only log genuinely new errors.
@@ -120,24 +152,47 @@ async function handleSmsReceived(sb, body) {
     if (error.code !== '23505') console.error('zoom-webhook: failed to store inbound message:', error.message);
     return;
   }
-
   if (!leadId || !inserted) return;
 
+  const { data: lead } = await sb.from('leads').select('ai_reply_paused').eq('id', leadId).maybeSingle();
+  if (!lead) return;
+
   // Opt-out is a hard compliance action — do it deterministically here rather
-  // than trusting the AI draft to also flag it. Runs regardless of whether
-  // drafting below succeeds.
-  if (isOptOutMessage(obj.message)) {
-    const { error: optErr } = await sb.from('leads').update({ opted_out: true, stage: 'Dead' }).eq('id', leadId);
+  // than trusting the AI to also flag it, and it always pauses future
+  // auto-replies regardless of qualification progress.
+  const optOut = isOptOutMessage(obj.message);
+  if (optOut) {
+    const { error: optErr } = await sb.from('leads').update({ opted_out: true, stage: 'Dead', ai_reply_paused: true }).eq('id', leadId);
     if (optErr) console.error('zoom-webhook: failed to move opted-out lead to Dead:', optErr.message);
   }
 
-  // Only draft when we know which lead this is — the framework and reply
-  // both depend on that lead's conversation history and property details.
+  // Once paused (fully qualified, or already handled), a human has taken
+  // over -- stop auto-replying. A STOP/DNC courtesy close still goes out
+  // even if the lead was already paused for some other reason.
+  if (lead.ai_reply_paused && !optOut) return;
+
+  const numberConfig = toPhone && getNumberConfigs().find((n) => n.phone === toPhone);
+  if (!numberConfig) {
+    await sb.from('inbound_messages').update({ draft_error: `No configured number matches ${toPhone}` }).eq('id', inserted.id);
+    return;
+  }
+
   try {
-    const draft = await draftReply(sb, ownerUserId, leadId);
-    await sb.from('inbound_messages').update({ draft_reply: draft }).eq('id', inserted.id);
+    const draft = await draftReply(sb, ownerUserId, leadId, hasAttachmentsNow);
+    const sendResult = await sendZoomSms({ numberConfig, to: fromPhone, message: draft.reply });
+    if (!sendResult.ok) throw new Error(sendResult.error);
+
+    await sb.from('inbound_messages').update({ draft_reply: draft.reply }).eq('id', inserted.id);
+    await sb.from('send_log').insert({
+      user_id: ownerUserId, phone: fromPhone, sent_from: sendResult.from,
+      sent_at: new Date().toISOString(), lead_id: leadId, body: draft.reply,
+    });
+
+    if (!optOut && draft.fullyQualified) {
+      await sb.from('leads').update({ ai_reply_paused: true, stage: 'Interested' }).eq('id', leadId);
+    }
   } catch (e) {
-    console.error('zoom-webhook: draft generation failed:', e.message);
+    console.error('zoom-webhook: auto-reply failed:', e.message);
     await sb.from('inbound_messages').update({ draft_error: e.message }).eq('id', inserted.id);
   }
 }

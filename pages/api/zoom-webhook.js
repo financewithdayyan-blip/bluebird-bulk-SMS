@@ -102,7 +102,7 @@ async function draftReply(sb, ownerUserId, leadId, hasAttachmentsNow) {
   const response = await anthropic.messages.create({
     model: DRAFT_MODEL,
     max_tokens: 300,
-    system: `You are Dayyan from Bluebird Acquisitions, texting a property owner who replied to a cold outreach SMS about buying their property for cash. Draft the next text message to send them — 1 to 3 short sentences, sounding like a real person texting, not corporate. No greeting like "Dear", no signature.\n\nWrite the way people actually text: never use an em dash (—) anywhere in the message, use commas or just start a new sentence instead; a casual emoji here and there is fine where it fits naturally (not in every message, and not more than one).\n\nHave a genuinely normal, human conversation — actually respond to whatever they just said instead of ignoring it to force the next scripted step. The framework below defines your goals and the rules for specific situations, not a rigid script to recite; use judgment for anything it doesn't explicitly cover, the way a real person working from the same goals would. Never invent facts, numbers, or offers that haven't actually come up in this conversation.\n\nFramework:\n${framework}\n\nProperty address: ${lead?.address || 'unknown'}\nOwner's name on file: ${lead?.name || 'unknown'}\nPhotos received so far: ${hasImages ? 'yes' : 'no'}`,
+    system: `You are Dayyan from Bluebird Acquisitions, texting a property owner who replied to a cold outreach SMS about buying their property for cash. Draft the next text message to send them — 1 to 3 short sentences, sounding like a real person texting, not corporate. No greeting like "Dear", no signature.\n\nBefore drafting, actually read the whole conversation above, both what they've said and what you've already said, so this reply is consistent with everything already established. Don't just react to their latest message in isolation, don't ask something already answered, and don't contradict something you already said or they already told you.\n\nWrite the way people actually text: never use an em dash (—) anywhere in the message, use commas or just start a new sentence instead; a casual emoji here and there is fine where it fits naturally (not in every message, and not more than one).\n\nHave a genuinely normal, human conversation — actually respond to whatever they just said instead of ignoring it to force the next scripted step. The framework below defines your goals and the rules for specific situations, not a rigid script to recite; use judgment for anything it doesn't explicitly cover, the way a real person working from the same goals would. Never invent facts, numbers, or offers that haven't actually come up in this conversation.\n\nFramework:\n${framework}\n\nProperty address: ${lead?.address || 'unknown'}\nOwner's name on file: ${lead?.name || 'unknown'}\nPhotos received so far: ${hasImages ? 'yes' : 'no'}`,
     messages: [{ role: 'user', content: `Conversation so far (oldest to newest):\n${transcript}\n\nDraft the next reply from us, and report whether this lead is now fully qualified.` }],
     tools: [{
       name: 'submit_reply',
@@ -117,7 +117,7 @@ async function draftReply(sb, ownerUserId, leadId, hasAttachmentsNow) {
           },
           negative_reply: {
             type: 'boolean',
-            description: 'True only if the lead is clearly declining / not interested in selling and this reply follows the framework\'s negative-reply script (e.g. "sorry, never going to bother you again"). Do not set this for a formal STOP/DNC request (that\'s handled separately) -- just for someone saying no / not interested. False for anything else, including neutral, cautious, or mid-qualification answers.',
+            description: 'True if the lead is clearly declining / not interested in selling, OR this is a confirmed wrong number (they have no connection to the property or owner at all) and this reply is closing the conversation out per the framework. Do not set this for a formal STOP/DNC request (that\'s handled separately) -- just for a decline or a dead-end wrong number. False for anything else, including neutral, cautious, or mid-qualification answers.',
           },
         },
         required: ['reply', 'fully_qualified', 'negative_reply'],
@@ -162,6 +162,27 @@ const DNC_PHRASE_PATTERNS = [
 ];
 function isDncPhrase(text) {
   return DNC_PHRASE_PATTERNS.some((re) => re.test(String(text || '').trim()));
+}
+
+// Profanity/hostility directed at us. Unlike the DNC phrases above, there's
+// no benign reading of someone swearing at a cold-outreach text -- a bare
+// curse word here is a strong enough signal on its own, so this doesn't need
+// the same end-anchoring. Curated to known swear words and censored spellings
+// rather than a broad wildcard, so it doesn't catch ordinary words like
+// "fork", "funk", or "stuck".
+const PROFANITY_PATTERNS = [
+  /\bfu+c*k+(?:ing|in['’]?|er|ed|s|face|tard)?\b/i,
+  /\bf[*#@$%]ck(?:ing|er|ed|s)?\b/i,
+  /\bf[*#@$%]{2}k(?:ing|er|ed|s)?\b/i,
+  /\bfck\b/i,
+  /\bpiss\s*off\b/i,
+  /\bscrew\s*you\b/i,
+  /\basshole\b/i,
+  /\bbitch\b/i,
+  /\bgo\s+to\s+hell\b/i,
+];
+function isProfane(text) {
+  return PROFANITY_PATTERNS.some((re) => re.test(String(text || '')));
 }
 
 // Tapback-style reactions (thumbs up/heart/etc. on one of our texts) come
@@ -221,11 +242,12 @@ async function handleSmsReceived(sb, body) {
   const { data: lead } = await sb.from('leads').select('ai_reply_paused, stage').eq('id', leadId).maybeSingle();
   if (!lead) return;
 
-  // Opt-out (carrier keyword OR a plain-English "don't contact me" request)
-  // is a hard compliance action — detect it deterministically rather than
-  // spending an AI call on it, and skip sending anything back entirely: no
-  // courtesy reply, no Anthropic cost, just a silent move to Dead.
-  const optOut = isOptOutMessage(obj.message) || isDncPhrase(obj.message);
+  // Opt-out (carrier keyword, a plain-English "don't contact me" request, or
+  // outright profanity/hostility) is handled deterministically rather than
+  // spending an AI call on it, and skips sending anything back entirely: no
+  // courtesy reply, no Anthropic cost, just a silent move to Dead. Someone
+  // cursing at a cold-outreach text isn't worth a reply either way.
+  const optOut = isOptOutMessage(obj.message) || isDncPhrase(obj.message) || isProfane(obj.message);
   if (optOut) {
     const { error: optErr } = await sb.from('leads').update({ opted_out: true, stage: 'Dead', ai_reply_paused: true }).eq('id', leadId);
     if (optErr) console.error('zoom-webhook: failed to move opted-out lead to Dead:', optErr.message);
@@ -280,10 +302,11 @@ async function handleSmsReceived(sb, body) {
     });
 
     if (draft.negativeReply) {
-      // A softer decline the deterministic phrase check didn't catch (e.g.
-      // "not interested" with no explicit "don't contact me") still gets a
-      // brief courtesy reply, then follows the same "never bother them
-      // again" promise as opt-out -- excluded from future bulk sends too.
+      // Covers a softer decline the deterministic phrase check didn't catch
+      // (e.g. "not interested" with no explicit "don't contact me"), and a
+      // confirmed wrong number with no connection to the property at all.
+      // Both get a brief closing reply, then are excluded from future bulk
+      // sends -- there's no real lead at this number either way.
       await sb.from('leads').update({ ai_reply_paused: true, stage: 'Dead', opted_out: true }).eq('id', leadId);
     } else if (draft.fullyQualified) {
       await sb.from('leads').update({ ai_reply_paused: true, stage: 'Interested' }).eq('id', leadId);

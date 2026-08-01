@@ -11,7 +11,13 @@
 // Dead (and is excluded from future bulk sends), and a fully qualified lead
 // moves to Interested. A global on/off switch in Settings (`ai_settings`
 // table) can disable the drafting/sending step entirely -- inbound messages
-// and Kanban routing still happen, but no auto-reply goes out.
+// and Kanban routing still happen, but no auto-reply goes out. Message
+// reactions (tapback-style thumbs up/heart, etc.) are detected and ignored
+// entirely -- they aren't real replies. Rapid multi-part texts from the same
+// lead are debounced: each message waits REPLY_DELAY_MS before acting, and
+// bails out if a newer message has since arrived, so only the last message
+// in a burst actually drafts and sends -- using the full, by-then-complete
+// transcript -- instead of every message triggering its own reply.
 //
 // Required env vars:
 //   ZOOM_WEBHOOK_SECRET_TOKEN — shown by Zoom when you add an Event
@@ -36,12 +42,15 @@ import { getNumberConfigs, sendZoomSms } from '../../lib/zoom';
 const DRAFT_MODEL = 'claude-haiku-4-5';
 
 // A reply that lands the instant a text comes in reads as an obvious bot.
-// This holds the auto-reply for a few seconds before sending so it feels
-// like someone actually read and typed it.
-const REPLY_DELAY_MS = 8000;
+// This also doubles as the debounce window for people who text in bursts
+// (three separate messages a few seconds apart, a typo correction sent
+// right after the original) -- see the supersede check in handleSmsReceived,
+// which is what actually makes a longer delay merge those into one reply
+// instead of just delaying multiple replies.
+const REPLY_DELAY_MS = 16000;
 
 export const config = { api: { bodyParser: false } };
-export const maxDuration = 30; // Anthropic call + this delay + the Zoom send can exceed the default timeout
+export const maxDuration = 45; // the delay above + the Anthropic call + the Zoom send
 
 function readRawBody(req) {
   return new Promise((resolve, reject) => {
@@ -155,6 +164,21 @@ function isDncPhrase(text) {
   return DNC_PHRASE_PATTERNS.some((re) => re.test(String(text || '').trim()));
 }
 
+// Tapback-style reactions (thumbs up/heart/etc. on one of our texts) come
+// through the webhook as a normal inbound SMS whose body is Zoom's
+// carrier-bridged summary of the reaction, e.g. `👍 to "our original text"`
+// or `Removed 👍 from "our original text"`. These aren't an actual answer to
+// anything -- treating them as a real reply was causing the AI to re-ask the
+// same question it had just asked, twice (once for the react, once for the
+// unreact).
+const REACTION_PATTERNS = [
+  /^[\p{Extended_Pictographic}️\s]+to\s+["“][\s\S]*["”]$/u,
+  /^Removed\s+[\p{Extended_Pictographic}️\s]+from\s+["“][\s\S]*["”]$/iu,
+];
+function isReactionMessage(text) {
+  return REACTION_PATTERNS.some((re) => re.test(String(text || '').trim()));
+}
+
 async function handleSmsReceived(sb, body) {
   const obj = body.payload?.object;
   if (!obj) return;
@@ -189,6 +213,10 @@ async function handleSmsReceived(sb, body) {
     return;
   }
   if (!leadId || !inserted) return;
+
+  // A reaction to one of our messages, not an actual reply -- log it (done
+  // above) and stop, so it never triggers a stage change or an AI reply.
+  if (isReactionMessage(obj.message)) return;
 
   const { data: lead } = await sb.from('leads').select('ai_reply_paused, stage').eq('id', leadId).maybeSingle();
   if (!lead) return;
@@ -228,8 +256,20 @@ async function handleSmsReceived(sb, body) {
   }
 
   try {
-    const draft = await draftReply(sb, ownerUserId, leadId, hasAttachmentsNow);
+    // Wait first, so someone texting in a burst (three short messages, a typo
+    // correction sent right after the original) has a chance to finish before
+    // we act. Only draft after the wait, using whatever's arrived by then.
     await new Promise((resolve) => setTimeout(resolve, REPLY_DELAY_MS));
+
+    // If a newer message for this lead has landed while we waited, that
+    // message's own invocation will wake up later and reply with the full,
+    // by-then-complete transcript -- bail out here instead of sending a
+    // reply based on a conversation that's already stale. This is what turns
+    // "three texts in five seconds" into one reply instead of three.
+    const { data: newer } = await sb.from('inbound_messages').select('id').eq('lead_id', leadId).gt('id', inserted.id).limit(1);
+    if (newer && newer.length) return;
+
+    const draft = await draftReply(sb, ownerUserId, leadId, hasAttachmentsNow);
     const sendResult = await sendZoomSms({ numberConfig, to: fromPhone, message: draft.reply });
     if (!sendResult.ok) throw new Error(sendResult.error);
 

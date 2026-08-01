@@ -638,19 +638,28 @@ select.field-input option{background:var(--navy-mid)}
       <input type="file" id="csv-file" accept=".csv"/>
       <div class="uz-icon">📂</div>
       <p><strong>Click or drag</strong> a .csv file here</p>
-      <p style="margin-top:5px;font-size:11.5px;">Expected columns: first name, last name, street, city, state, zip, phone, notes</p>
+      <p style="margin-top:5px;font-size:11.5px;">Expected columns: first name, last name, phone, phone 2, email, address, city, state, zip, beds, baths, sqft, lot size, property type, auction date, source, notes</p>
     </div>
     <div id="map-section" style="display:none;margin-top:18px;">
       <div class="section-label">Map CSV Columns</div>
       <div class="map-grid">
-        <div class="map-field"><label>First name column</label><select class="field-input" id="col-first"></select></div>
-        <div class="map-field"><label>Last name column</label><select class="field-input" id="col-last"></select></div>
-        <div class="map-field"><label>Street column</label><select class="field-input" id="col-street"></select></div>
-        <div class="map-field"><label>City column</label><select class="field-input" id="col-city"></select></div>
-        <div class="map-field"><label>State column</label><select class="field-input" id="col-state"></select></div>
-        <div class="map-field"><label>Zip column</label><select class="field-input" id="col-zip"></select></div>
-        <div class="map-field"><label>Phone column</label><select class="field-input" id="col-phone"></select></div>
-        <div class="map-field"><label>Notes column</label><select class="field-input" id="col-notes"></select></div>
+        <div class="map-field"><label>First Name</label><select class="field-input" id="col-first"></select></div>
+        <div class="map-field"><label>Last Name</label><select class="field-input" id="col-last"></select></div>
+        <div class="map-field"><label>Phone</label><select class="field-input" id="col-phone"></select></div>
+        <div class="map-field"><label>Phone 2</label><select class="field-input" id="col-phone2"></select></div>
+        <div class="map-field"><label>Email</label><select class="field-input" id="col-email"></select></div>
+        <div class="map-field"><label>Address</label><select class="field-input" id="col-address"></select></div>
+        <div class="map-field"><label>City</label><select class="field-input" id="col-city"></select></div>
+        <div class="map-field"><label>State</label><select class="field-input" id="col-state"></select></div>
+        <div class="map-field"><label>Zip</label><select class="field-input" id="col-zip"></select></div>
+        <div class="map-field"><label>Beds</label><select class="field-input" id="col-beds"></select></div>
+        <div class="map-field"><label>Baths</label><select class="field-input" id="col-baths"></select></div>
+        <div class="map-field"><label>Sqft</label><select class="field-input" id="col-sqft"></select></div>
+        <div class="map-field"><label>Lot Size</label><select class="field-input" id="col-lot_size"></select></div>
+        <div class="map-field"><label>Property Type</label><select class="field-input" id="col-property_type"></select></div>
+        <div class="map-field"><label>Auction Date</label><select class="field-input" id="col-auction_date"></select></div>
+        <div class="map-field"><label>Source</label><select class="field-input" id="col-source"></select></div>
+        <div class="map-field"><label>Notes</label><select class="field-input" id="col-notes"></select></div>
       </div>
       <div style="margin-top:16px;">
         <div class="section-label">Tag this batch</div>
@@ -678,7 +687,8 @@ select.field-input option{background:var(--navy-mid)}
 <div class="modal-bg" id="notes-modal">
   <div class="modal" style="width:500px;max-height:88vh;display:flex;flex-direction:column;">
     <h2>📝 <span id="notes-lead-name"></span></h2>
-    <div id="notes-lead-sub" style="font-size:11.5px;color:var(--muted);margin:-10px 0 14px;"></div>
+    <div id="notes-lead-sub" style="font-size:11.5px;color:var(--muted);margin:-10px 0 10px;"></div>
+    <div id="notes-property-details" style="display:none;font-size:11.5px;color:var(--muted);background:var(--navy-card);border-radius:8px;padding:8px 11px;margin-bottom:14px;line-height:1.6;"></div>
     <div style="margin-bottom:14px;">
       <div class="section-label" style="margin-bottom:6px;">Tags</div>
       <div class="tag-input-wrap" style="min-height:36px;padding:5px 8px;">
@@ -796,22 +806,33 @@ function parseCSV(text) {
 
 function populateColumnSelects(headers) {
   const selectors = [
-    {id:'col-first',  hint:['first']},
-    {id:'col-last',   hint:['last']},
-    {id:'col-street', hint:['street','address','addr']},
-    {id:'col-city',   hint:['city']},
-    {id:'col-state',  hint:['state']},
-    {id:'col-zip',    hint:['zip','postal']},
-    {id:'col-phone',  hint:['phone','mobile','cell','number']},
-    {id:'col-notes',  hint:['note','comment','remark']},
+    {id:'col-first',         hint:['first']},
+    {id:'col-last',          hint:['last']},
+    {id:'col-phone',         hint:['phone 1','phone1','mobile','cell','phone'], exclude:['2','ii','second','alt']},
+    {id:'col-phone2',        hint:['phone 2','phone2','phone ii','second phone','alt phone','alternate phone']},
+    {id:'col-email',         hint:['email','e-mail']},
+    {id:'col-address',       hint:['address','street','addr']},
+    {id:'col-city',          hint:['city']},
+    {id:'col-state',         hint:['state']},
+    {id:'col-zip',           hint:['zip','postal']},
+    {id:'col-beds',          hint:['bed']},
+    {id:'col-baths',         hint:['bath']},
+    {id:'col-sqft',          hint:['sqft','sq ft','square feet','square footage']},
+    {id:'col-lot_size',      hint:['lot size','lot sqft','lot']},
+    {id:'col-property_type', hint:['property type','prop type']},
+    {id:'col-auction_date',  hint:['auction date','auction']},
+    {id:'col-source',        hint:['source']},
+    {id:'col-notes',         hint:['note','comment','remark']},
   ];
-  selectors.forEach(({id, hint}) => {
+  selectors.forEach(({id, hint, exclude}) => {
     const sel = document.getElementById(id);
     sel.innerHTML = '<option value="">— skip —</option>';
     headers.forEach((h, i) => {
       const opt = document.createElement('option');
       opt.value = i; opt.textContent = h;
-      if (hint.some(k => h.toLowerCase().includes(k))) opt.selected = true;
+      const lower = h.toLowerCase();
+      const matches = hint.some(k => lower.includes(k)) && !(exclude || []).some(k => lower.includes(k));
+      if (matches) opt.selected = true;
       sel.appendChild(opt);
     });
   });
@@ -838,24 +859,35 @@ async function importLeads() {
   if (!csvRaw.length) return;
   if (!sbSession) { toast('⚠️ Sign in first.'); return; }
   const ci = {};
-  for (const k of ['first','last','street','city','state','zip','phone','notes']) {
+  for (const k of ['first','last','phone','phone2','email','address','city','state','zip','beds','baths','sqft','lot_size','property_type','auction_date','source','notes']) {
     ci[k] = document.getElementById('col-' + k).value;
   }
   const cell = (r, k) => ci[k] !== '' ? (r[+ci[k]] || '').trim() : '';
   const csvRows = csvRaw.slice(1).filter(r => r.some(c => c));
   const noteTexts = csvRows.map(r => cell(r, 'notes'));
-  const rows = csvRows.map(r => {
-    const stateZip = [cell(r,'state'), cell(r,'zip')].filter(Boolean).join(' ');
-    return {
-      name:    [cell(r,'first'), cell(r,'last')].filter(Boolean).join(' '),
-      phone:   ci.phone !== '' ? formatPhone(r[+ci.phone] || '') : '',
-      address: [cell(r,'street'), cell(r,'city'), stateZip].filter(Boolean).join(', '),
-      stage: 'Cold Call',
-      opted_out: false,
-      status: 'pending',
-      tags: [...pendingTags],
-    };
-  });
+  const rows = csvRows.map(r => ({
+    name:          [cell(r,'first'), cell(r,'last')].filter(Boolean).join(' '),
+    first_name:    cell(r,'first'),
+    last_name:     cell(r,'last'),
+    phone:         ci.phone !== '' ? formatPhone(r[+ci.phone] || '') : '',
+    phone2:        ci.phone2 !== '' ? formatPhone(r[+ci.phone2] || '') : '',
+    email:         cell(r,'email'),
+    address:       cell(r,'address'),
+    city:          cell(r,'city'),
+    state:         cell(r,'state'),
+    zip:           cell(r,'zip'),
+    beds:          cell(r,'beds'),
+    baths:         cell(r,'baths'),
+    sqft:          cell(r,'sqft'),
+    lot_size:      cell(r,'lot_size'),
+    property_type: cell(r,'property_type'),
+    auction_date:  cell(r,'auction_date'),
+    source:        cell(r,'source'),
+    stage: 'Cold Call',
+    opted_out: false,
+    status: 'pending',
+    tags: [...pendingTags],
+  }));
   // Insert in chunks so large CSVs (3000-4000+ rows) aren't limited or rejected
   const chunk = 500;
   const inserted = [];
@@ -1715,7 +1747,11 @@ function sv(id,val){ if(document.getElementById(id) && val) document.getElementB
 
 function exportCSV() {
   if (!leads.length) { toast('No leads to export.'); return; }
-  const cols = ['name','phone','address','stage','opted_out','status','selected'];
+  const cols = [
+    'first_name', 'last_name', 'phone', 'phone2', 'email', 'address', 'city', 'state', 'zip',
+    'beds', 'baths', 'sqft', 'lot_size', 'property_type', 'auction_date', 'source',
+    'name', 'stage', 'opted_out', 'status', 'selected',
+  ];
   const rows = [cols.join(','), ...leads.map(l => cols.map(c => `"${(l[c]||'')}"`).join(','))];
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([rows.join('\n')], {type:'text/csv'}));
@@ -2233,12 +2269,32 @@ async function sendReplyNow() {
   closeReplyThread();
 }
 
+function renderLeadPropertyDetails(l) {
+  const el = document.getElementById('notes-property-details');
+  const cityStateZip = [l.city, [l.state, l.zip].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+  const parts = [
+    l.phone2 && `📱 ${l.phone2}`,
+    l.email && `✉️ ${l.email}`,
+    cityStateZip && `📍 ${cityStateZip}`,
+    l.property_type && `🏠 ${l.property_type}`,
+    (l.beds || l.baths) && `🛏 ${[l.beds && l.beds + ' bd', l.baths && l.baths + ' ba'].filter(Boolean).join(' / ')}`,
+    l.sqft && `📐 ${l.sqft} sqft`,
+    l.lot_size && `🌳 Lot ${l.lot_size}`,
+    l.auction_date && `⚖️ Auction ${l.auction_date}`,
+    l.source && `📋 Source: ${l.source}`,
+  ].filter(Boolean);
+  if (!parts.length) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  el.style.display = '';
+  el.innerHTML = parts.map(p => esc(p)).join(' &nbsp;·&nbsp; ');
+}
+
 async function openNotes(id) {
   const l = leads.find(x => x.id === id);
   if (!l) return;
   notesLeadId = id;
   document.getElementById('notes-lead-name').textContent = l.name || l.phone || 'Lead';
   document.getElementById('notes-lead-sub').textContent = [l.phone, l.address].filter(Boolean).join('  ·  ');
+  renderLeadPropertyDetails(l);
   document.getElementById('notes-list').innerHTML = '<div style="color:var(--muted);font-size:12px;">Loading…</div>';
   document.getElementById('notes-modal').classList.add('open');
   renderNotesTags();

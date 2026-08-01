@@ -9,7 +9,9 @@
 // actual offer. Leads are also auto-routed across the Kanban board: any
 // reply lands in Replied, a declined/negative reply or opt-out moves to
 // Dead (and is excluded from future bulk sends), and a fully qualified lead
-// moves to Interested.
+// moves to Interested. A global on/off switch in Settings (`ai_settings`
+// table) can disable the drafting/sending step entirely -- inbound messages
+// and Kanban routing still happen, but no auto-reply goes out.
 //
 // Required env vars:
 //   ZOOM_WEBHOOK_SECRET_TOKEN — shown by Zoom when you add an Event
@@ -208,10 +210,16 @@ async function handleSmsReceived(sb, body) {
 
   // Any reply mid-qualification surfaces the lead in the Replied column —
   // this gets upgraded to Interested below if this exact message also
-  // completes qualification.
+  // completes qualification. This still happens even with auto-reply
+  // switched off below -- only the drafting/sending is gated by that.
   if (lead.stage !== 'Replied') {
     await sb.from('leads').update({ stage: 'Replied' }).eq('id', leadId);
   }
+
+  // Global kill switch (Settings → AI Reply Framework). Missing row means
+  // the owner has never touched the toggle, which defaults to enabled.
+  const { data: aiSettings } = await sb.from('ai_settings').select('auto_reply_enabled').eq('user_id', ownerUserId).maybeSingle();
+  if (aiSettings && aiSettings.auto_reply_enabled === false) return;
 
   const numberConfig = toPhone && getNumberConfigs().find((n) => n.phone === toPhone);
   if (!numberConfig) {
